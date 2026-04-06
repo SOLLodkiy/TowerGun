@@ -11,6 +11,7 @@ public class WrapAround : MonoBehaviour
     public bool inWall = false;
     public float bounceFactor = 1.4f;
     private float wallStayTimer = 0f;
+    [SerializeField] private float wallPushForce = 2f;
 
     private Rigidbody2D rb;
 
@@ -27,6 +28,8 @@ public class WrapAround : MonoBehaviour
         float height = 2f * mainCamera.orthographicSize;
         screenWidth = height * mainCamera.aspect;
         rb = GetComponent<Rigidbody2D>();
+        if (rb == null)
+            Debug.LogError("Rigidbody2D не найден на объекте " + gameObject.name);
     }
 
     void OnTriggerEnter2D(Collider2D collision)
@@ -55,25 +58,19 @@ public class WrapAround : MonoBehaviour
 
     void OnTriggerStay2D(Collider2D collision)
     {
-        if (collision.gameObject.layer == LayerMask.NameToLayer("Wall"))
-        {
-            wallStayTimer += Time.deltaTime;
+        if (rb == null) return; // защита от NullReference
 
-            if (wallStayTimer >= 0.1f)
-            {
-                wallStayTimer = 0f;
-                if (!canWrapAround)
-                {
-                    if (collision.transform.position.x < transform.position.x) // Стена слева
-                    {
-                        ApplyBounce(Vector2.right);
-                    }
-                    else if (collision.transform.position.x > transform.position.x) // Стена справа
-                    {
-                        ApplyBounce(Vector2.left);
-                    }
-                }
-            }
+        if (collision.gameObject.layer == LayerMask.NameToLayer("Wall") && !canWrapAround)
+        {
+            Vector2 pushDir;
+
+            if (collision.transform.position.x < transform.position.x)
+                pushDir = Vector2.right;
+            else
+                pushDir = Vector2.left;
+
+            // мягко выталкиваем игрока из стены
+            rb.linearVelocity = new Vector2(pushDir.x * wallPushForce, rb.linearVelocity.y);
         }
     }
 
@@ -166,10 +163,16 @@ public class WrapAround : MonoBehaviour
     {
         if (rb != null)
         {
-            float speed = Mathf.Abs(rb.linearVelocity.x);
-            float minBounce = 0.1f;
-            float finalSpeed = Mathf.Max(speed, minBounce);
-            rb.AddForce(direction * finalSpeed * bounceFactor, ForceMode2D.Impulse);
+            Vector2 velocity = rb.linearVelocity;
+
+            float minHorizontalSpeed = 2f;
+
+            velocity.x = direction.x * Mathf.Max(Mathf.Abs(velocity.x), minHorizontalSpeed) * bounceFactor;
+
+            // немного сохраняем вертикаль (чтобы не "гасился" прыжок)
+            velocity.y = Mathf.Max(velocity.y, 1f);
+
+            rb.linearVelocity = velocity;
         }
     }
 }

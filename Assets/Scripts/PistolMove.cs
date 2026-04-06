@@ -11,7 +11,13 @@ public class PistolMove : MonoBehaviour
 {
     public GunMove playerScript; // Ссылка на скрипт игрока
 
-    public float recoilForce = 8f; // Сила отдачи при выстреле
+    [Header("Recoil Feel Settings")]
+    [SerializeField] private float recoilMultiplier = 0.7f;
+    [SerializeField] private float horizontalRecoilMultiplier = 0.6f;
+    [SerializeField] private float verticalRecoilMultiplier = 0.85f;
+    [SerializeField] private float playerMass = 1.3f; // чуть тяжелее = приятнее контроль
+    [SerializeField] private float recoilForce = 7f; // Сила отдачи при выстреле
+
     public GameObject bulletPrefab; // Префаб пули
     public float bulletSpeed = 15f; // Скорость пули
     public Transform bulletSpawn; // Точка появления пули
@@ -27,15 +33,15 @@ public class PistolMove : MonoBehaviour
     public bool slowMoModifierEnabled = false;                  // булева переменная для изменения
     [Tooltip("Через сколько секунд удержания включаем плавное замедление")]
     public float slowMotionDelay = 0.1f;
-    [Tooltip("Скорость, с которой TimeScale доходит до минимума (1/сек)")]
+    [Tooltip("Скорость, с которой TimeScale доходит до минимума (1/сек)")]
     public float slowMotionBuildSpeed = 2f;
     private float defaultSlowMotionBuildSpeed = 2f;
-    [Tooltip("Скорость возвращения TimeScale к 1 (1/сек)")]
+    [Tooltip("Скорость возвращения TimeScale к 1 (1/сек)")]
     public float slowMotionReturnSpeed = 3f;
 
     /*‑‑‑ Показатель визуального эффекта ‑‑‑*/
     [Header("Post‑process (edge blur)")]
-    public Volume slowMoVolume;             // ссылка на Global Volume
+    public Volume slowMoVolume;             // ссылка на Global Volume
     [Range(0f, 1f)] public float blurMaxIntensity = 0.7f;
 
     private bool timeIsModified = false;     // сейчас TimeScale ≠ 1?
@@ -52,6 +58,8 @@ public class PistolMove : MonoBehaviour
     public float boostDuration = 2f;
     private bool isBoosted = false;
     private float boostTimer = 0f;
+    // ИСПРАВЛЕНИЕ 1: флаг чтобы не запускать две корутины буста одновременно
+    private bool isBoostCoroutineRunning = false;
 
     // UI элементы для патронов
     public GameObject[] ammoSlots; // Массив слотов патронов (8 слотов)
@@ -89,6 +97,9 @@ public class PistolMove : MonoBehaviour
     [Tooltip("Дальность, когда замедление максимальное")]
     public float trapMinDistance = 1f;         // м
 
+    // кэшируем свой коллайдер для замеров дистанции до ловушек
+    private Collider2D selfCollider;
+
     public GameObject Saw;
 
     public bool BabyMode = false; // Булевая переменная для режима «малыш»
@@ -104,6 +115,7 @@ public class PistolMove : MonoBehaviour
     
         Input.ResetInputAxes(); // Сбросить нажатия перед началом игры
         rb = GetComponent<Rigidbody2D>();
+        selfCollider = GetComponent<Collider2D>(); // кэшируем для GetTrapSlowScale
         ammo.SetActive(false);
         reloadSlider.gameObject.SetActive(false); // Скрыть слайдер в начале
         Saw.SetActive(false);
@@ -129,6 +141,13 @@ public class PistolMove : MonoBehaviour
         {
             slowMoVolume.profile.TryGet(out vignettePP);
         }
+
+        if (vignettePP != null)
+        {
+            vignettePP.intensity.value = 0f;
+        }
+
+        rb.mass = playerMass;
 
         // ---------- BabyMode handler ----------
         ApplyBabyMode();
@@ -202,9 +221,9 @@ public class PistolMove : MonoBehaviour
 
     void HandleSlowMotion()
     {
-        if (!canShoot) return;               // пауза / меню
+        if (!canShoot) return;               // пауза / меню
 
-        /* A. Aim‑slow‑mo ------------------------------------------------*/
+        /* A. Aim‑slow‑mo ------------------------------------------------*/
         float aimScale;
         if (Input.GetMouseButton(0))
         {
@@ -223,10 +242,10 @@ public class PistolMove : MonoBehaviour
                         Time.unscaledDeltaTime * slowMotionReturnSpeed);
         }
 
-        /* B. Trap‑slow‑mo -----------------------------------------------*/
+        /* B. Trap‑slow‑mo -----------------------------------------------*/
         float trapScale = GetTrapSlowScale();         // 1 … trapMaxSlowScale
 
-        /* C. Итог --------------------------------------------------------*/
+        /* C. Итог --------------------------------------------------------*/
         float finalScale = Mathf.Min(aimScale, trapScale);
         ApplyTimeScale(finalScale);
     }
@@ -242,14 +261,16 @@ public class PistolMove : MonoBehaviour
             scale.x = 0.65f;
             scale.y = signY * 0.65f;
             scale.z = 0.65f;
-            recoilForce = 9.5f;
+            recoilForce = 15.5f;
+            playerMass = 1.2f;
         }
         else
         {
             scale.x = 0.8f;
             scale.y = signY * 0.8f;
             scale.z = 0.8f;
-            recoilForce = 8f;
+            recoilForce = 12.5f;
+            playerMass = 1.4f;
         }
 
         transform.localScale = scale;
@@ -265,8 +286,19 @@ public class PistolMove : MonoBehaviour
         {
             if (col.CompareTag("Dead") || col.CompareTag("DeadlyBlock"))
             {
-                float d = Vector2.Distance(transform.position, col.transform.position);
-                if (d < minDist) minDist = d;
+                // ИСПРАВЛЕНИЕ 4: измеряем дистанцию до ближайшей точки коллайдера,
+                // а не до пивота объекта — корректно для больших врагов и блоков
+                if (selfCollider != null)
+                {
+                    ColliderDistance2D colDist = selfCollider.Distance(col);
+                    float d = colDist.distance;
+                    if (d < minDist) minDist = d;
+                }
+                else
+                {
+                    float d = Vector2.Distance(transform.position, col.transform.position);
+                    if (d < minDist) minDist = d;
+                }
             }
         }
 
@@ -288,8 +320,24 @@ public class PistolMove : MonoBehaviour
         if (vignettePP != null)
         {
             float minPossible = Mathf.Min(slowMotionMinScale, trapMaxSlowScale);
-            float k = Mathf.InverseLerp(1f, minPossible, value);   // 1→0
-            vignettePP.intensity.value = Mathf.Lerp(0f, blurMaxIntensity, 1f - k);
+            float t = Mathf.InverseLerp(1f, minPossible, value);
+
+            // ❗ если нет slow-mo — полностью выключаем
+            if (Mathf.Approximately(value, 1f))
+            {
+                vignettePP.intensity.value = 0f;
+            }
+            else
+            {
+                float targetIntensity = Mathf.Lerp(0f, blurMaxIntensity, t);
+
+                vignettePP.intensity.value = Mathf.Lerp(
+                    vignettePP.intensity.value,
+                    targetIntensity,
+                    Time.unscaledDeltaTime * 10f
+                );
+            }
+
             vignettePP.smoothness.value = 1f;
         }
     }
@@ -333,11 +381,28 @@ public class PistolMove : MonoBehaviour
             float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
             bullet.transform.rotation = Quaternion.Euler(new Vector3(0, 0, angle));
 
-            //Отвечает за передвижение отталкиванием:
-            rb.AddForce(-direction * recoilForce, ForceMode2D.Impulse);
+            // ИСПРАВЛЕНИЕ 2: гасим компоненту скорости, противоположную отдаче,
+            // чтобы feel выстрела был стабильным независимо от текущей скорости персонажа
+            Vector2 recoilDir = -direction;
+            float currentAlongRecoil = Vector2.Dot(rb.linearVelocity, recoilDir);
+            if (currentAlongRecoil < 0)
+            {
+                rb.linearVelocity -= recoilDir * currentAlongRecoil;
+            }
+
+            Vector2 recoil = new Vector2(
+                recoilDir.x * horizontalRecoilMultiplier,
+                recoilDir.y * verticalRecoilMultiplier
+            );
+
+            // нормализуем чтобы не ломалась сила по диагонали
+            recoil = recoil.normalized;
+
+            rb.AddForce(recoil * recoilForce * recoilMultiplier, ForceMode2D.Impulse);
+
 
             // Δv от импульса отдачи (импульс / масса)
-            Vector2 dv = (-direction * recoilForce) / rb.mass;
+            Vector2 dv = recoilDir * recoilForce / rb.mass;
             intendedVelocity += dv;
 
             // такой же кламп, как у реальной скорости
@@ -352,6 +417,9 @@ public class PistolMove : MonoBehaviour
             currentAmmo--;
             UpdateAmmoUI();
 
+            // ИСПРАВЛЕНИЕ 1: используем флаг isBoostCoroutineRunning вместо только isBoosted,
+            // чтобы не запустить две корутины одновременно (когда патроны кончились
+            // и одновременно сработал noFireBoostThreshold)
             if (currentAmmo == 0 && !isBoosted)
             {
                 StartCoroutine(StartBoostReload());
@@ -419,13 +487,17 @@ public class PistolMove : MonoBehaviour
         }
     }
 
+    // ИСПРАВЛЕНИЕ 1: добавлен флаг isBoostCoroutineRunning — защита от двойного запуска
     IEnumerator StartBoostReload()
     {
+        if (isBoostCoroutineRunning) yield break;
+        isBoostCoroutineRunning = true;
         isBoosted = true;
         boostTimer = 0f;
         yield return new WaitForSeconds(boostDuration);
         isBoosted = false;
         boostTimer = 0f;
+        isBoostCoroutineRunning = false;
     }
 
     void UpdateAmmoUI()

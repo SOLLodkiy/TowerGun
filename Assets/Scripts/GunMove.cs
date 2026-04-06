@@ -47,6 +47,9 @@ public class GunMove : MonoBehaviour
 
     private float startY; // Начальная позиция по Y
 
+    // ИСПРАВЛЕНИЕ 5: флаг для обработки G-клавиши перенесён из FixedUpdate в Update
+    private bool pendingDebugDie = false;
+
     void Start()
     {
         StopAllCoroutines();
@@ -105,15 +108,19 @@ public class GunMove : MonoBehaviour
         }
     }
 
-    void FixedUpdate()
+    // ИСПРАВЛЕНИЕ 5: GetKeyDown перенесён в Update — в FixedUpdate он пропускает нажатия,
+    // потому что FixedUpdate и Update работают на разных частотах
+    void Update()
     {
-        // Проверка нажатия клавиши G
         if (Input.GetKeyDown(KeyCode.G))
         {
-            DiePlayer();                 // Делаем видимым эффект смерти
-            StartCoroutine(GameOver());  // Запускаем корутину GameOver
+            DiePlayer();
+            StartCoroutine(GameOver());
         }
+    }
 
+    void FixedUpdate()
+    {
         // Ограничение скорости
         if (rb.linearVelocity.magnitude > maxSpeed)
         {
@@ -191,8 +198,8 @@ public class GunMove : MonoBehaviour
             }
         }
 
-        coinText.text = (coinCount - sessionCoinCount).ToString();
-
+        // ИСПРАВЛЕНИЕ 7: убрана лишняя строка coinText.text до анимации —
+        // UpdateCoinTexts() ниже и так корректно обновит оба текста
         yield return new WaitForSeconds(0.5f); // Подождать 0.5 секунд
         Time.timeScale = 1f;
 
@@ -281,9 +288,11 @@ public class GunMove : MonoBehaviour
         // Создаем эффект крови
         CreateBloodEffect(transform.position);
 
-        // Отключить коллизию игрока
-        GetComponent<Collider2D>().enabled = false;
-        GetComponent<BoxCollider2D>().enabled = false; 
+        // ИСПРАВЛЕНИЕ 6: отключаем все коллайдеры через GetComponents —
+        // GetComponent<Collider2D>() и GetComponent<BoxCollider2D>() могли вернуть
+        // один и тот же коллайдер, оставив второй включённым
+        foreach (var col in GetComponents<Collider2D>())
+            col.enabled = false;
 
         // Изменить цвет спрайта игрока на красный
         if (playerSprite != null)
