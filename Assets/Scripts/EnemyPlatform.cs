@@ -36,7 +36,7 @@ public class EnemyPlatform : MonoBehaviour
         StopAllCoroutines(); // Остановить все корутины на этом объекте
         
         // Находим игрока в сцене
-        player = FindObjectOfType<GunMove>().transform;
+        player = FindFirstObjectByType<GunMove>().transform;
 
         // Инициализация
         lastScaleX = transform.localScale.x;
@@ -243,11 +243,11 @@ public class EnemyPlatform : MonoBehaviour
 
         // Добавляем физику пистолету
         Rigidbody2D gunRb = gun.GetComponent<Rigidbody2D>();
-        gunRb.isKinematic = false;
+        gunRb.bodyType = RigidbodyType2D.Dynamic;
         gunRb.linearVelocity = new Vector2(gunRb.linearVelocity.x, gunRb.linearVelocity.y); // Применяем инерцию для пистолета
 
         // Включаем физику для самого врага и отбрасываем его
-        rb.isKinematic = false;
+        rb.bodyType = RigidbodyType2D.Dynamic;
         rb.freezeRotation = false; // Разблокируем вращение
         Vector2 direction = (transform.position - player.position).normalized;
         rb.AddForce(direction * 5f, ForceMode2D.Impulse); // Отбрасываем врага от пули
@@ -278,7 +278,7 @@ public class EnemyPlatform : MonoBehaviour
                 PlayerPrefs.SetInt("TotalKills", PlayerPrefs.GetInt("TotalKills", 0) + 1);
                 PlayerPrefs.SetInt("TotalCoinsCollected", PlayerPrefs.GetInt("TotalCoinsCollected", 0) + 5);
                 // Обновить прогресс на слотах (если магазин открыт)
-                foreach (var item in FindObjectsOfType<ShopItemUI>())
+                foreach (var item in FindObjectsByType<ShopItemUI>(FindObjectsSortMode.None))
                 {
                     item.UpdateProgressFromPrefs();
                     item.TryAutoUnlock();

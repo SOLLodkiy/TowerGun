@@ -2,7 +2,6 @@ using UnityEngine;
 using System.Collections.Generic;
 using System.Collections;
 using UnityEngine.SceneManagement;
-using UnityEngine.UI;
 using System.Linq;
 
 public class EquipmentManager : MonoBehaviour
@@ -11,24 +10,37 @@ public class EquipmentManager : MonoBehaviour
 
     private HashSet<ShopItemData> equippedItems = new HashSet<ShopItemData>();
 
-    public GunMove playerScript;
+    // ОПТИМИЗАЦИЯ: кэшируем все ShopItemData при старте один раз
+    // вместо Resources.FindObjectsOfTypeAll при каждом рестарте
+    private ShopItemData[] allShopItems;
 
-    void Start()
-    {
-        StopAllCoroutines(); // Остановить все корутины на этом объекте
-    }
+    public GunMove playerScript;
 
     void Awake()
     {
-        if (Instance == null) Instance = this;
-        else Destroy(gameObject);
-        DontDestroyOnLoad(gameObject);
+        if (Instance == null)
+        {
+            Instance = this;
+            DontDestroyOnLoad(gameObject);
+        }
+        else
+        {
+            Destroy(gameObject);
+            return;
+        }
 
-        RestoreEquippedEffectsOnStart(); // сразу при старте сцены
+        // ОПТИМИЗАЦИЯ: загружаем один раз, кэшируем
+        allShopItems = Resources.FindObjectsOfTypeAll<ShopItemData>();
+
+        RestoreEquippedEffectsOnStart();
         SaveEquippedItems();
     }
 
-    // Добавить предмет
+    void Start()
+    {
+        StopAllCoroutines();
+    }
+
     public void EquipItem(ShopItemData item)
     {
         equippedItems.Add(item);
@@ -36,7 +48,6 @@ public class EquipmentManager : MonoBehaviour
         SaveEquippedItems();
     }
 
-    // Снять предмет
     public void UnequipItem(ShopItemData item)
     {
         if (equippedItems.Contains(item))
@@ -47,58 +58,46 @@ public class EquipmentManager : MonoBehaviour
         }
     }
 
-    // Вернуть список всех экипированных предметов
     public IEnumerable<ShopItemData> GetEquippedItems() => equippedItems;
 
     private void ApplyEffects(ShopItemData item)
     {
-        // Применяем эффект по скрипту и полю, если задано
-        if (!string.IsNullOrEmpty(item.scriptName) && !string.IsNullOrEmpty(item.boolTargetName))
-        {
-            var type = System.Type.GetType(item.scriptName);
-            if (type != null)
-            {
-                var target = FindObjectOfType(type);
-                if (target != null)
-                {
-                    var field = type.GetField(item.boolTargetName, 
-                        System.Reflection.BindingFlags.Instance | 
-                        System.Reflection.BindingFlags.Public | 
-                        System.Reflection.BindingFlags.NonPublic);
-                    if (field != null && field.FieldType == typeof(bool))
-                    {
-                        field.SetValue(target, true);
-                    }
-                }
-            }
-        }
+        if (string.IsNullOrEmpty(item.scriptName) || string.IsNullOrEmpty(item.boolTargetName))
+            return;
 
-        Debug.Log($"Эффект применён: {item.itemName}");
+        var type = System.Type.GetType(item.scriptName);
+        if (type == null) return;
+
+        var target = FindFirstObjectByType(type);
+        if (target == null) return;
+
+        var field = type.GetField(item.boolTargetName,
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.Public |
+            System.Reflection.BindingFlags.NonPublic);
+
+        if (field != null && field.FieldType == typeof(bool))
+            field.SetValue(target, true);
     }
 
     private void RemoveEffects(ShopItemData item)
     {
-        if (!string.IsNullOrEmpty(item.scriptName) && !string.IsNullOrEmpty(item.boolTargetName))
-        {
-            var type = System.Type.GetType(item.scriptName);
-            if (type != null)
-            {
-                var target = FindObjectOfType(type);
-                if (target != null)
-                {
-                    var field = type.GetField(item.boolTargetName, 
-                        System.Reflection.BindingFlags.Instance | 
-                        System.Reflection.BindingFlags.Public | 
-                        System.Reflection.BindingFlags.NonPublic);
-                    if (field != null && field.FieldType == typeof(bool))
-                    {
-                        field.SetValue(target, false);
-                    }
-                }
-            }
-        }
+        if (string.IsNullOrEmpty(item.scriptName) || string.IsNullOrEmpty(item.boolTargetName))
+            return;
 
-        Debug.Log($"Эффект снят: {item.itemName}");
+        var type = System.Type.GetType(item.scriptName);
+        if (type == null) return;
+
+        var target = FindFirstObjectByType(type);
+        if (target == null) return;
+
+        var field = type.GetField(item.boolTargetName,
+            System.Reflection.BindingFlags.Instance |
+            System.Reflection.BindingFlags.Public |
+            System.Reflection.BindingFlags.NonPublic);
+
+        if (field != null && field.FieldType == typeof(bool))
+            field.SetValue(target, false);
     }
 
     private void SaveEquippedItems()
@@ -112,14 +111,13 @@ public class EquipmentManager : MonoBehaviour
         string saved = PlayerPrefs.GetString("EquippedItems", "");
         if (string.IsNullOrEmpty(saved)) return;
 
-        foreach (var itemName in saved.Split(';'))
+        // ОПТИМИЗАЦИЯ: используем кэшированный массив вместо повторного поиска
+        string[] names = saved.Split(';');
+        foreach (var itemName in names)
         {
             if (string.IsNullOrEmpty(itemName)) continue;
 
-            // Находим предмет через все ShopItemData на проекте
-            ShopItemData item = Resources.FindObjectsOfTypeAll<ShopItemData>()
-                .FirstOrDefault(x => x.name == itemName);
-            
+            ShopItemData item = System.Array.Find(allShopItems, x => x.name == itemName);
             if (item != null)
             {
                 equippedItems.Add(item);
@@ -128,10 +126,6 @@ public class EquipmentManager : MonoBehaviour
         }
     }
 
-
-    /// <summary>
-    /// Чистый перезапуск сцены через 0.1 секунды
-    /// </summary>
     public void RestartScene()
     {
         StartCoroutine(RestartSceneCoroutine());
@@ -139,40 +133,25 @@ public class EquipmentManager : MonoBehaviour
 
     private IEnumerator RestartSceneCoroutine()
     {
+        // ОПТИМИЗАЦИЯ: убран ручной Destroy всех объектов — LoadSceneAsync сам
+        // уничтожает сцену. Ручной цикл Destroy создавал тысячи pending-вызовов
+        // за один кадр прямо перед загрузкой и был причиной спайков GC.
+
         if (playerScript == null)
-        {
-            playerScript = FindObjectOfType<GunMove>();
-        }
+            playerScript = FindFirstObjectByType<GunMove>();
 
         if (playerScript != null)
-        {
             playerScript.ResetSession();
-        }
         else
-        {
-            Debug.LogError("GunMove не найден при перезапуске сцены");
-}
+            Debug.LogError("GunMove не найден при перезапуске");
 
-        // Сбрасываем статические данные, если есть (например, счетчики, рекорды за сессию)
-
-        // Деактивируем все объекты с сцене кроме EquipmentManager и самого скрипта
-        GameObject[] allObjects = FindObjectsOfType<GameObject>();
-        foreach (GameObject obj in allObjects)
-        {
-            if (obj != this.gameObject && obj.name != "EquipmentManager")
-            {
-                Destroy(obj);
-            }
-        }
-
-        // Ждем один кадр, чтобы Unity обработал удаление объектов
-        yield return null;
-
-        // Сбрасываем Time.timeScale
         Time.timeScale = 1f;
 
-        // Загрузка сцены с асинхронным методом, чтобы освободить память
-        AsyncOperation asyncLoad = SceneManager.LoadSceneAsync(SceneManager.GetActiveScene().buildIndex);
+        // Один кадр паузы чтобы timeScale успел сброситься
+        yield return null;
+
+        AsyncOperation asyncLoad = SceneManager.LoadSceneAsync(
+            SceneManager.GetActiveScene().buildIndex);
         asyncLoad.allowSceneActivation = true;
 
         yield return asyncLoad;

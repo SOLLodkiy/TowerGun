@@ -1,49 +1,66 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 
 public class CameraFollow : MonoBehaviour
 {
-    public Transform target; // Цель, за которой будет следовать камера
-    public float smoothSpeed = 0.125f; // Скорость сглаживания движения камеры
+    public Transform target;
+    [Tooltip("Время сглаживания. Чем меньше, тем резче камера догоняет игрока.")]
+    public float smoothTime = 0.15f; 
+
+    [Header("Shake Settings")]
+    [Range(0f, 5f)]
+    [Tooltip("Глобальный множитель тряски. 1 — стандарт, 0 — выключить, 2+ — безумие.")]
+    public float shakeIntensity = 1.0f; 
 
     private Vector3 offset;
-    private Vector3 shakeOffset;
-    public float shakeTime;
-    public float shakeAmount;
+    private float shakeTime;
+    private float shakeAmount;
+
+    private Transform camTransform;
+    
+    private Vector3 currentCleanPos;
+    private float currentVelocityY = 0f;
+    private float highestY;
+    private float startX;
 
     void Start()
     {
-        // Расчет начального смещения камеры относительно цели
-        offset = transform.position - target.position;
+        camTransform = transform;
+        offset = camTransform.position - target.position;
+
+        startX = camTransform.position.x;
+        highestY = target.position.y + offset.y;
+
+        currentCleanPos = camTransform.position;
     }
 
     void LateUpdate()
     {
-        if (target != null)
+        if (target == null) return;
+
+        float targetY = target.position.y + offset.y;
+
+        if (targetY > highestY)
         {
-            // Получаем новое положение камеры
-            Vector3 targetPosition = target.position + offset;
-
-            // Ограничиваем движение камеры только вверх
-            if (targetPosition.y < transform.position.y)
-            {
-                targetPosition.y = transform.position.y;
-            }
-
-            // Сглаживание движения камеры
-            Vector3 smoothedPosition = Vector3.Lerp(transform.position, targetPosition, smoothSpeed);
-
-            // Применение тряски
-            if (shakeTime > 0)
-            {
-                Vector3 shake = Random.insideUnitSphere * shakeAmount;
-                smoothedPosition += shake;
-                shakeTime -= Time.deltaTime;
-            }
-
-            transform.position = new Vector3(transform.position.x, smoothedPosition.y, transform.position.z);
+            highestY = targetY;
         }
+
+        float newY = Mathf.SmoothDamp(currentCleanPos.y, highestY, ref currentVelocityY, smoothTime);
+        currentCleanPos = new Vector3(startX, newY, currentCleanPos.z);
+
+        float shakeX = 0f;
+        float shakeY = 0f;
+
+        if (shakeTime > 0f)
+        {
+            // Умножаем базовую силу тряски на твой глобальный коэффициент
+            float finalAmount = shakeAmount * shakeIntensity;
+            
+            shakeX = Random.Range(-finalAmount, finalAmount);
+            shakeY = Random.Range(-finalAmount, finalAmount);
+            shakeTime -= Time.unscaledDeltaTime; 
+        }
+
+        camTransform.position = currentCleanPos + new Vector3(shakeX, shakeY, 0f);
     }
 
     public void SetShake(float amount, float duration)

@@ -47,9 +47,9 @@ public class ShopUI : MonoBehaviour
     private void Awake()
     {
         Instance = this;
-        shopManager = FindObjectOfType<ShopUIManager>();
+        shopManager = FindFirstObjectByType<ShopUIManager>();
 
-        player = FindObjectOfType<PistolMove>();
+        player = FindFirstObjectByType<PistolMove>();
 
         // Старт — плашка скрыта
         if (infoPanel != null)
@@ -230,7 +230,7 @@ public class ShopUI : MonoBehaviour
         actionButton.onClick.RemoveAllListeners();
         actionButton.onClick.AddListener(() =>
         {
-            GunMove player = FindObjectOfType<GunMove>();
+            GunMove player = FindFirstObjectByType<GunMove>();
             if (player != null && player.coinCount >= data.cost)
             {
                 player.coinCount -= data.cost;
@@ -240,7 +240,7 @@ public class ShopUI : MonoBehaviour
                 item.Purchase();
                 ShowEquipInfo(data, item, false);
                 // Обновляем прогресс всех ShopItemUI
-                foreach (var item in FindObjectsOfType<ShopItemUI>())
+                foreach (var item in FindObjectsByType<ShopItemUI>(FindObjectsSortMode.None))
                 {
                     item.UpdateProgressFromPrefs();
                     item.TryAutoUnlock();
@@ -298,7 +298,7 @@ public class ShopUI : MonoBehaviour
         var type = System.Type.GetType(data.scriptName);
         if (type == null) { Debug.LogWarning("S"); return; }
 
-        var target = FindObjectOfType(type);
+        var target = FindFirstObjectByType(type);
         if (target == null) { Debug.LogWarning("O"); return; }
 
         var field = type.GetField(data.boolTargetName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
@@ -317,7 +317,7 @@ public class ShopUI : MonoBehaviour
 
     private void RestoreEquippedEffectsOnStart()
     {
-        foreach (var item in FindObjectsOfType<ShopItemUI>())
+        foreach (var item in FindObjectsByType<ShopItemUI>(FindObjectsSortMode.None))
         {
             var data = item.Data;
             if (PlayerPrefs.GetInt($"Effect_{data.name}", 0) == 1)

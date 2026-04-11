@@ -1,146 +1,182 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
-using System.Linq;
 
 public class GunMove : MonoBehaviour
 {
-    public PistolMove playerScript; // Ссылка на скрипт игрока
+    public PistolMove playerScript;
 
-    public GameObject gameOverPanel; // Панель "ты проиграл"
-    public GameObject ContinueText; // Текст продолжить
+    public GameObject gameOverPanel;
+    public GameObject ContinueText;
     public GameObject StartText;
     public GameObject PauseButton;
-    public GameObject playerWeapon; // Сюда вставляем объект пистолета из иерархии игрока
-    public GameObject playerSprite; // Дочерний объект с SpriteRenderer
-    public GameObject bloodEffectPrefab; // Префаб эффекта крови
-    public GameObject coinEffectPrefab; // Префаб эффекта монет
-    public Text distanceText; // Текст для отображения дистанции
-    public Text finalDistanceText; // Текст для отображения финальной дистанции
-    public Text recordText; // Текст для отображения рекорда
-    public Text coinText; // Текст для отображения количества монет
-    public int coinCount; // Количество собранных монет
-    public Text sessionCoinText; // Новый текст для отображения количества монет за забег
-    public float sessionCoinCount; // Количество монет за текущий забег
+    public GameObject playerWeapon;
+    public GameObject playerSprite;
+    public GameObject bloodEffectPrefab;
+    public GameObject coinEffectPrefab;
+    public Text distanceText;
+    public Text finalDistanceText;
+    public Text recordText;
+    public Text coinText;
+    public int coinCount;
+    public Text sessionCoinText;
+    public float sessionCoinCount;
 
-    public GameObject[] objectsToAppearAfterShot; // Массив объектов, которые появляются после выстрела
-    public GameObject[] objectsToDisappearOnShot; // Массив объектов, которые исчезают при выстреле
-    public GameObject[] objectsToAppearOnGameOver; // Массив объектов, которые появляются при проигрыше
-    public GameObject[] objectsToDisappearOnGameOver; // Массив объектов, которые пропадают при проигрыше
-    public GameObject[] objectsToDisappearIfRecordLessThanTen; // Массив объектов, которые исчезают при старте, если рекорд меньше 10
+    public GameObject[] objectsToAppearAfterShot;
+    public GameObject[] objectsToDisappearOnShot;
+    public GameObject[] objectsToAppearOnGameOver;
+    public GameObject[] objectsToDisappearOnGameOver;
+    public GameObject[] objectsToDisappearIfRecordLessThanTen;
 
     private Rigidbody2D rb;
+    private SpriteRenderer playerSpriteRenderer;
+    private Collider2D[] selfColliders;
+    private DangerIndicator dangerIndicator;
 
-    public float currentDistance; // Текущая дистанция
-    public float highestDistance; // Наивысшая дистанция за сессию
-    public float recordDistance; // Рекордная дистанция
+    public float currentDistance;
+    public float highestDistance;
+    public float recordDistance;
 
-    public Animator animator; // Ссылка на Animator компонент
+    public Animator animator;
+    public float maxSpeed = 10f;
 
-    // Новая переменная для ограничения скорости
-    public float maxSpeed = 10f; // Максимальная скорость персонажа
+    private float timeScaleIncrement = 0.3f;
+    private float baseTimeScale = 1f;
+    private Coroutine timeAccelerationCoroutine;
 
-    private float timeScaleIncrement = 0.3f; // Шаг увеличения времени каждую секунду
-    private float baseTimeScale = 1f; // Базовая скорость времени
-    private Coroutine timeAccelerationCoroutine; // Ссылка на корутину для ускорения времени
+    private float startY;
 
-    private float startY; // Начальная позиция по Y
+    private ShopItemUI[] cachedShopItems;
+    private bool isGameOverRunning = false;
+    private bool isShakingCoinText = false;
 
-    // ИСПРАВЛЕНИЕ 5: флаг для обработки G-клавиши перенесён из FixedUpdate в Update
-    private bool pendingDebugDie = false;
+    private int lastDisplayedDistance = -1;
+
+    private Rigidbody2D weaponRb;
+    private Collider2D weaponCollider;
+
+    // ОПТИМИЗАЦИЯ: кэшируем WaitForSeconds — каждый new WaitForSeconds(x)
+    // аллоцирует объект в heap, что видно как оранжевый скачок в профайлере.
+    // Создаём один раз и переиспользуем.
+    private WaitForSeconds wait05s;
+    private WaitForSeconds wait005s;
+
+    // ОПТИМИЗАЦИЯ: кэшируем WaitUntil с лямбдой — лямбда тоже аллоцируется
+    // при каждом создании. Создаём один раз в Start.
+    private WaitUntil waitForInput;
+
+    // ОПТИМИЗАЦИЯ: System.Text.StringBuilder для строк с числами —
+    // убирает аллокации от конкатенации в FixedUpdate и UpdateCoinTexts
+    private System.Text.StringBuilder sb = new System.Text.StringBuilder(32);
+
+    // ОПТИМИЗАЦИЯ: пул для эффекта крови — Instantiate каждую смерть
+    // создаёт GC-мусор. Переиспользуем один объект.
+    private GameObject bloodEffectInstance;
 
     void Start()
     {
         StopAllCoroutines();
         rb = GetComponent<Rigidbody2D>();
-        gameOverPanel.SetActive(false); // Скрыть панель в начале
+        ResetTime();
+        Time.maximumDeltaTime = 0.1f; // Разрешает максимум ~5 шагов физики за кадр
+
+        selfColliders   = GetComponents<Collider2D>();
+        dangerIndicator = GetComponent<DangerIndicator>();
+        if (playerSprite != null)
+            playerSpriteRenderer = playerSprite.GetComponent<SpriteRenderer>();
+
+        if (playerWeapon != null)
+        {
+            weaponCollider = playerWeapon.GetComponent<Collider2D>();
+            weaponRb       = playerWeapon.GetComponent<Rigidbody2D>();
+        }
+
+        // Создаём кэшированные yield-объекты один раз
+        wait05s      = new WaitForSeconds(0.5f);
+        wait005s     = new WaitForSeconds(0.05f);
+        waitForInput = new WaitUntil(() => Input.GetMouseButtonUp(0) || Input.touchCount > 0);
+
+        // Создаём эффект крови заранее и прячем — будем показывать при смерти
+        if (bloodEffectPrefab != null)
+        {
+            bloodEffectInstance = Instantiate(bloodEffectPrefab, Vector2.zero, Quaternion.identity);
+            bloodEffectInstance.SetActive(false);
+        }
+
+        gameOverPanel.SetActive(false);
         ContinueText.SetActive(false);
         StartText.SetActive(true);
         PauseButton.SetActive(false);
-        // Загрузка сохранённого количества монет
+
         coinCount = PlayerPrefs.GetInt("Coins", 0);
         UpdateCoinUI();
-        startY = transform.position.y; // Сохранить начальную позицию
-        recordDistance = PlayerPrefs.GetFloat("RecordDistance", 0f); // Загрузить рекорд из PlayerPrefs
+        startY         = transform.position.y;
+        recordDistance = PlayerPrefs.GetFloat("RecordDistance", 0f);
 
-        // Деактивируем объекты, которые появляются после выстрела
         foreach (GameObject obj in objectsToAppearAfterShot)
-        {
-            if (obj != null)
-            {
-                obj.SetActive(false);
-            }
-        }
-
-        // Активируем объекты, которые исчезают при выстреле
+            if (obj != null) obj.SetActive(false);
         foreach (GameObject obj in objectsToDisappearOnShot)
-        {
-            if (obj != null)
-            {
-                obj.SetActive(true);
-            }
-        }
-         // Сброс количества монет за забег
+            if (obj != null) obj.SetActive(true);
+
         sessionCoinCount = 0;
         UpdateSessionCoinUI();
-        // Деактивируем объекты, которые исчезают, если рекорд меньше 10
+
         if (recordDistance < 10)
-        {
             foreach (GameObject obj in objectsToDisappearIfRecordLessThanTen)
-            {
-                if (obj != null)
-                {
-                    obj.SetActive(false);
-                }
-            }
-        }
+                if (obj != null) obj.SetActive(false);
 
         int best = PlayerPrefs.GetInt("BestDistance", 0);
         if (recordDistance > best)
         {
             PlayerPrefs.SetInt("BestDistance", Mathf.RoundToInt(recordDistance));
-            foreach (var item in FindObjectsOfType<ShopItemUI>())
+            cachedShopItems = FindObjectsByType<ShopItemUI>(FindObjectsSortMode.None);
+            foreach (var item in cachedShopItems)
             {
                 item.UpdateProgressFromPrefs();
                 item.TryAutoUnlock();
             }
         }
-    }
 
-    // ИСПРАВЛЕНИЕ 5: GetKeyDown перенесён в Update — в FixedUpdate он пропускает нажатия,
-    // потому что FixedUpdate и Update работают на разных частотах
-    void Update()
-    {
-        if (Input.GetKeyDown(KeyCode.G))
-        {
-            DiePlayer();
-            StartCoroutine(GameOver());
-        }
+        if (cachedShopItems == null)
+            cachedShopItems = FindObjectsByType<ShopItemUI>(FindObjectsSortMode.None);
     }
 
     void FixedUpdate()
     {
-        // Ограничение скорости
-        if (rb.linearVelocity.magnitude > maxSpeed)
-        {
+        // Оставляем здесь ТОЛЬКО физику
+        if (rb.linearVelocity.sqrMagnitude > maxSpeed * maxSpeed)
             rb.linearVelocity = rb.linearVelocity.normalized * maxSpeed;
+    }
+
+    void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.G) && !isGameOverRunning)
+        {
+            DiePlayer();
+            StartCoroutine(GameOver());
         }
 
-        // Обновляем текст с дистанцией
+        // Расчет дистанции перенесен сюда
         currentDistance = transform.position.y - startY;
-        distanceText.text = Mathf.Max(0, currentDistance).ToString("0") + " м";
-
-        // Обновляем рекордную дистанцию за сессию
         if (currentDistance > highestDistance)
-        {
             highestDistance = currentDistance;
+
+        int displayDist = Mathf.Max(0, Mathf.FloorToInt(currentDistance));
+        if (displayDist != lastDisplayedDistance)
+        {
+            lastDisplayedDistance = displayDist;
+            sb.Clear();
+            sb.Append(displayDist);
+            sb.Append(" м");
+            distanceText.text = sb.ToString();
         }
     }
 
     void OnTriggerEnter2D(Collider2D other)
     {
-        if (other.CompareTag("Dead"))
+        if (other.CompareTag("Dead") && !isGameOverRunning)
         {
             DiePlayer();
             StopAllCoroutines();
@@ -150,123 +186,102 @@ public class GunMove : MonoBehaviour
 
     IEnumerator GameOver()
     {
-        Debug.Log("Проигрыш!");
+        isGameOverRunning = true;
+
+        if (timeAccelerationCoroutine != null)
+        {
+            StopCoroutine(timeAccelerationCoroutine);
+            timeAccelerationCoroutine = null;
+        }
+        ResetTime(); // Тот самый метод из Шага 1
+
+        playerScript.FlushPendingShots();
+
         PlayerPrefs.SetInt("TotalLosses", PlayerPrefs.GetInt("TotalLosses", 0) + 1);
         PlayerPrefs.SetFloat("TotalDistance", PlayerPrefs.GetFloat("TotalDistance", 0) + currentDistance);
-        float sessionDuration = 0f;
-        if (playerScript.sessionStarted) 
+
+        if (playerScript.sessionStarted)
         {
-            sessionDuration = Time.time - playerScript.sessionStartTime;
-            PlayerPrefs.SetFloat("TotalActiveTime", PlayerPrefs.GetFloat("TotalActiveTime", 0f) + sessionDuration);
+            float sessionDuration = Time.time - playerScript.sessionStartTime;
+            PlayerPrefs.SetFloat("TotalActiveTime",
+                PlayerPrefs.GetFloat("TotalActiveTime", 0f) + sessionDuration);
             PlayerPrefs.Save();
-            Debug.Log("Время с первого выстрела до смерти: " + sessionDuration + " сек.");
         }
-        Time.timeScale = 1f;
-        playerScript.canShoot = false; // Отключить возможность стрельбы
-        rb.linearVelocity = Vector2.zero; // Остановить движение
 
+        ResetTime();
+        playerScript.canShoot = false;
+        rb.linearVelocity = Vector2.zero;
         playerScript.currentAmmo = playerScript.maxAmmo;
-        
+
         PauseButton.SetActive(false);
+        gameOverPanel.SetActive(true);
 
-        gameOverPanel.SetActive(true); // Показать панель "ты проиграл"
-
-        // Обновляем текст финальной дистанции и рекорда
-        finalDistanceText.text = "Твоя дистанция: " + Mathf.Max(0, currentDistance).ToString("F2") + " м";
+        // ОПТИМИЗАЦИЯ: string.Format вместо конкатенации с ToString("F2") —
+        // меньше промежуточных строк в heap
+        finalDistanceText.text = string.Format("Твоя дистанция: {0:F2} м",
+                                               Mathf.Max(0, currentDistance));
         if (currentDistance > recordDistance)
         {
             recordDistance = currentDistance;
-            PlayerPrefs.SetFloat("RecordDistance", recordDistance); // Сохранить новый рекорд
+            PlayerPrefs.SetFloat("RecordDistance", recordDistance);
             PlayerPrefs.Save();
         }
-        recordText.text = "ㅤㅤㅤРекорд:ㅤㅤㅤ " + recordDistance.ToString("F2") + " м";
+        recordText.text = string.Format("ㅤㅤㅤРекорд:ㅤㅤㅤ {0:F2} м", recordDistance);
 
-        // Активируем объекты при проигрыше
         foreach (GameObject obj in objectsToAppearOnGameOver)
-        {
-            if (obj != null)
-            {
-                obj.SetActive(true);
-            }
-        }
-
+            if (obj != null) obj.SetActive(true);
         foreach (GameObject obj in objectsToDisappearOnGameOver)
-        {
-            if (obj != null)
-            {
-                obj.SetActive(false);
-            }
-        }
+            if (obj != null) obj.SetActive(false);
 
-        // ИСПРАВЛЕНИЕ 7: убрана лишняя строка coinText.text до анимации —
-        // UpdateCoinTexts() ниже и так корректно обновит оба текста
-        yield return new WaitForSeconds(0.5f); // Подождать 0.5 секунд
-        Time.timeScale = 1f;
+        // ОПТИМИЗАЦИЯ: используем кэшированный WaitForSeconds вместо new каждый раз
+        yield return wait05s;
+        ResetTime();
 
-        // Обновляем общее количество монет
         yield return StartCoroutine(UpdateCoinTexts());
 
-        yield return new WaitForSeconds(0.5f); // Подождать 0.5 секунд
-        Time.timeScale = 1f;
+        yield return wait05s;
+        ResetTime();
 
-        ContinueText.SetActive(true); // Показать текст "Продолжить"
+        ContinueText.SetActive(true);
 
-        // Ожидание нажатия кнопки
-        yield return new WaitUntil(() => Input.GetMouseButtonUp(0) || Input.touchCount > 0);
+        // ОПТИМИЗАЦИЯ: используем кэшированный WaitUntil вместо new каждый раз
+        yield return waitForInput;
 
-        playerScript.isWaitingToShoot = true; // Установить флаг ожидания
-        yield return new WaitForSeconds(0.05f); // Ждать еще 1 секунду
-        playerScript.isWaitingToShoot = false; // Разрешить стрельбу
+        playerScript.isWaitingToShoot = true;
+        yield return wait005s;
+        playerScript.isWaitingToShoot = false;
 
-        foreach (var item in FindObjectsOfType<ShopItemUI>())
-        {
-            Destroy(item.gameObject);
-        }
-        // Загружаем сцену заново
+        if (cachedShopItems != null)
+            foreach (var item in cachedShopItems)
+                if (item != null) Destroy(item.gameObject);
+
         EquipmentManager.Instance.RestartScene();
         StopAllCoroutines();
-
-        yield break; // корутина завершается, сцена будет перезапущена
+        yield break;
     }
 
     private bool hasDroppedWeapon = false;
 
     public void DisablePlayer()
     {
-        // Отключить возможность стрелять и двигаться
         playerScript.canShoot = false;
-        GetComponent<DangerIndicator>().enableWarnings = false; // Отключить подсказки
-        rb.linearVelocity = Vector2.zero; // Остановить движение
+        if (dangerIndicator != null) dangerIndicator.enableWarnings = false;
+        rb.linearVelocity = Vector2.zero;
 
-        // Создаем эффект крови
         CreateBloodEffect(transform.position);
 
-        // Отключить коллизию игрока
         GetComponent<Collider2D>().enabled = false;
 
-        // Изменить цвет спрайта игрока на красный
-        if (playerSprite != null)
-        {
-            SpriteRenderer spriteRenderer = playerSprite.GetComponent<SpriteRenderer>();
-            if (spriteRenderer != null)
-            {
-                spriteRenderer.color = Color.red;
-            }
-        }
+        if (playerSpriteRenderer != null) playerSpriteRenderer.color = Color.red;
 
-        // Выбросить оружие, если оно еще не выброшено
-        if (!hasDroppedWeapon)
-        {
-            DropWeapon();
-            hasDroppedWeapon = true; // Устанавливаем флаг
-        }
-        // Отталкивание игрока в противоположную сторону от пистолета
+        if (!hasDroppedWeapon) { DropWeapon(); hasDroppedWeapon = true; }
+
         KnockbackPlayer();
 
         if (timeAccelerationCoroutine == null)
         {
-            // Сохраняем текущую скорость времени и запускаем корутину
-            baseTimeScale = Time.timeScale;
+            // ИСПРАВЛЕНИЕ: всегда стартуем с 1, не с текущего timeScale
+            baseTimeScale = 1f;
             timeAccelerationCoroutine = StartCoroutine(TimeAccelerationRoutine());
         }
     }
@@ -275,103 +290,78 @@ public class GunMove : MonoBehaviour
     {
         if (timeAccelerationCoroutine != null)
         {
-            // Останавливаем корутину и сбрасываем время
             StopCoroutine(timeAccelerationCoroutine);
             timeAccelerationCoroutine = null;
-            Time.timeScale = baseTimeScale; // Возвращаем стандартное значение времени
+            // ИСПРАВЛЕНИЕ: сбрасываем всегда в 1, не в baseTimeScale —
+            // baseTimeScale мог быть уже завышен от предыдущей смерти
+            ResetTime();
         }
 
-        // Отключить возможность стрелять и двигаться
         playerScript.canShoot = false;
-        rb.linearVelocity = Vector2.zero; // Остановить движение
+        rb.linearVelocity = Vector2.zero;
 
-        // Создаем эффект крови
         CreateBloodEffect(transform.position);
 
-        // ИСПРАВЛЕНИЕ 6: отключаем все коллайдеры через GetComponents —
-        // GetComponent<Collider2D>() и GetComponent<BoxCollider2D>() могли вернуть
-        // один и тот же коллайдер, оставив второй включённым
-        foreach (var col in GetComponents<Collider2D>())
+        foreach (var col in selfColliders)
             col.enabled = false;
 
-        // Изменить цвет спрайта игрока на красный
-        if (playerSprite != null)
-        {
-            SpriteRenderer spriteRenderer = playerSprite.GetComponent<SpriteRenderer>();
-            if (spriteRenderer != null)
-            {
-                spriteRenderer.color = Color.red;
-            }
-        }
+        if (playerSpriteRenderer != null) playerSpriteRenderer.color = Color.red;
 
-        // Выбросить оружие, если оно еще не выброшено
-        if (!hasDroppedWeapon)
-        {
-            DropWeapon();
-            hasDroppedWeapon = true; // Устанавливаем флаг
-        }
+        if (!hasDroppedWeapon) { DropWeapon(); hasDroppedWeapon = true; }
     }
 
     void DropWeapon()
     {
-        if (playerWeapon != null)
-        {
-        // Открепляем оружие от игрока
+        if (playerWeapon == null) return;
+
         playerWeapon.transform.parent = null;
 
-        // Включаем коллайдер для оружия, если отключен (чтобы можно было взаимодействовать)
-        Collider2D weaponCollider = playerWeapon.GetComponent<Collider2D>();
-        if (weaponCollider != null)
-        {
-            weaponCollider.enabled = true;
-        }
-
-        // Добавляем компонент Rigidbody2D для движения, если его нет
-        Rigidbody2D weaponRb = playerWeapon.GetComponent<Rigidbody2D>();
-        if (weaponRb == null)
-        {
-            weaponRb = playerWeapon.AddComponent<Rigidbody2D>();
-        }
-
-        // Устанавливаем скорость для выброса оружия в направлении, куда оно направлено
-        weaponRb.linearVelocity = playerScript.bulletSpawn.right * 5f; // Скорость выброса
-        }
+        if (weaponCollider != null) weaponCollider.enabled = true;
+        if (weaponRb == null) weaponRb = playerWeapon.AddComponent<Rigidbody2D>();
+        weaponRb.linearVelocity = playerScript.bulletSpawn.right * 5f;
     }
 
     void KnockbackPlayer()
     {
-        // Добавить импульс игроку в противоположную сторону от выброса оружия
-        Vector2 knockbackDirection = -playerScript.bulletSpawn.right; // Направление от пистолета в противоположную сторону
-        float knockbackForce = 5f; // Сила отталкивания
-
-        // Применить силу отталкивания к игроку
-        rb.AddForce(knockbackDirection * knockbackForce, ForceMode2D.Impulse);
+        rb.AddForce(-playerScript.bulletSpawn.right * 5f, ForceMode2D.Impulse);
     }
 
     void CreateBloodEffect(Vector2 position)
     {
-        if (bloodEffectPrefab != null)
-        {
-            Instantiate(bloodEffectPrefab, position, Quaternion.identity);
-        }
+        if (bloodEffectInstance == null) return;
+
+        // ОПТИМИЗАЦИЯ: переиспользуем один объект эффекта вместо Instantiate каждую смерть.
+        // Перемещаем и активируем — ParticleSystem сам остановится после проигрывания.
+        bloodEffectInstance.transform.position = position;
+        bloodEffectInstance.SetActive(false); // сброс
+        bloodEffectInstance.SetActive(true);  // воспроизведение заново
     }
+
+    // Максимальный timeScale во время анимации смерти — не даём физике разогнаться
+    private const float MAX_DEATH_TIMESCALE = 3f;
 
     private IEnumerator TimeAccelerationRoutine()
     {
-        int elapsedSeconds = 0; // Счётчик секунд
+        int elapsedSeconds = 0;
         while (true)
         {
-            elapsedSeconds++; // Увеличиваем счетчик секунд
-            Time.timeScale = baseTimeScale + (timeScaleIncrement * elapsedSeconds); // Увеличиваем скорость времени
+            elapsedSeconds++;
+            float target = baseTimeScale + timeScaleIncrement * elapsedSeconds;
+            // ИСПРАВЛЕНИЕ: ограничиваем timeScale — без этого физика делала тысячи
+            // шагов за кадр (2316 шагов в профайлере) и это была главная причина лагов.
+            // При timeScale=7 физика работает в 7 раз интенсивнее — спираль смерти.
+            Time.timeScale = Mathf.Min(target, MAX_DEATH_TIMESCALE);
 
-            yield return new WaitForSeconds(1f); // Ждём одну секунду реального времени
+            // ИСПРАВЛЕНИЕ: WaitForSecondsRealtime не зависит от timeScale —
+            // WaitForSeconds ускорялся вместе с timeScale и разгонял сам себя
+            yield return new WaitForSecondsRealtime(1f);
         }
     }
 
-    public void ResetSession()    
+    public void ResetSession()
     {
         sessionCoinCount = 0;
-        highestDistance = 0;
+        highestDistance  = 0;
     }
 
     public void UpdateCoinUI()
@@ -382,74 +372,73 @@ public class GunMove : MonoBehaviour
     public void UpdateSessionCoinUI()
     {
         sessionCoinText.text = sessionCoinCount.ToString();
-
-        // Запускаем тряску текста
         StartCoroutine(ShakeCoinText());
     }
 
-    // Новая корутина для обновления текстов монет
     IEnumerator UpdateCoinTexts()
     {
-        // Определяем время, за которое нужно уменьшить монеты до нуля
-        float duration = 0.6f; // 1 секунда
-        float initialSessionCoinCount = sessionCoinCount; // Начальное количество монет за сессию
-        float decreaseAmount = initialSessionCoinCount > 0 ? initialSessionCoinCount / duration : 0; // Количество, на которое будем уменьшать за кадр
-        float elapsedTime = 0f; // Время, прошедшее с начала уменьшения
+        float duration     = 0.6f;
+        float initial      = sessionCoinCount;
+        float decreaseRate = initial > 0f ? initial / duration : 0f;
 
-        // Уменьшение монет за сессию
-        while (sessionCoinCount > 0)
+        while (sessionCoinCount > 0f)
         {
-            sessionCoinText.text = Mathf.Floor(sessionCoinCount).ToString(); // Приведение к целому числу для отображения
-            // Уменьшаем количество монет на величину decreaseAmount за каждый кадр
-            sessionCoinCount -= decreaseAmount * Time.deltaTime; 
-            // Запускаем тряску текста
-            StartCoroutine(ShakeCoinText());
-            sessionCoinCount = Mathf.Max(sessionCoinCount, 0); // Убедимся, что значение не станет отрицательным
-            coinText.text = (coinCount - Mathf.Floor(sessionCoinCount)).ToString(); // Приведение к целому числу для отображения
-            elapsedTime += Time.deltaTime; // Увеличиваем время
-            yield return null; // Ждем следующего кадра
+            sessionCoinCount -= decreaseRate * Time.deltaTime;
+            sessionCoinCount  = Mathf.Max(sessionCoinCount, 0f);
+
+            int floored = Mathf.FloorToInt(sessionCoinCount);
+
+            // ОПТИМИЗАЦИЯ: StringBuilder вместо ToString каждый кадр во время анимации
+            sb.Clear();
+            sb.Append(floored);
+            sessionCoinText.text = sb.ToString();
+
+            sb.Clear();
+            sb.Append(coinCount - floored);
+            coinText.text = sb.ToString();
+
+            if (!isShakingCoinText)
+                StartCoroutine(ShakeCoinText());
+
+            yield return null;
         }
-        
-        sessionCoinText.text = "0"; // Убедимся, что текст будет равен 0
-        coinText.text = (coinCount).ToString(); // Убедимся, что текст будет равен конечному значению
+
+        sessionCoinText.text = "0";
+        coinText.text = coinCount.ToString();
     }
 
     IEnumerator ShakeCoinText()
     {
-    Vector3 originalPosition = sessionCoinText.transform.localPosition; // Сохраняем оригинальную позицию
-    float shakeDuration = 0.33f; // Длительность тряски
-    float shakeMagnitude = 3.4f; // Сила тряски
+        isShakingCoinText = true;
 
-    for (float t = 0; t < shakeDuration; t += Time.deltaTime)
-    {
-        float xOffset = Random.Range(-shakeMagnitude, shakeMagnitude);
-        float yOffset = Random.Range(-shakeMagnitude, shakeMagnitude);
-        sessionCoinText.transform.localPosition = new Vector3(originalPosition.x + xOffset, originalPosition.y + yOffset, originalPosition.z);
-        yield return null; // Ждем до следующего кадра
-    }
+        Vector3 orig    = sessionCoinText.transform.localPosition;
+        float duration  = 0.33f;
+        float magnitude = 3.4f;
 
-    sessionCoinText.transform.localPosition = originalPosition; // Возвращаем текст в оригинальную позицию
+        for (float t = 0f; t < duration; t += Time.deltaTime)
+        {
+            sessionCoinText.transform.localPosition = new Vector3(
+                orig.x + Random.Range(-magnitude, magnitude),
+                orig.y + Random.Range(-magnitude, magnitude),
+                orig.z);
+            yield return null;
+        }
+
+        sessionCoinText.transform.localPosition = orig;
+        isShakingCoinText = false;
     }
 
     public void HandleObjectsOnShot()
     {
-        // Появление объектов после выстрела
         foreach (GameObject obj in objectsToAppearAfterShot)
-        {
-            if (obj != null)
-            {
-                obj.SetActive(true);
-            }
-        }
-
-        // Исчезновение объектов при выстреле
+            if (obj != null) obj.SetActive(true);
         foreach (GameObject obj in objectsToDisappearOnShot)
-        {
-            if (obj != null)
-            {
-                obj.SetActive(false);
-            }
-        }
+            if (obj != null) obj.SetActive(false);
     }
 
+    private void ResetTime()
+    {
+        Time.timeScale = 1f;
+        Time.fixedDeltaTime = 0.02f; // Стандартный шаг физики (50 FPS)
+    }
 }

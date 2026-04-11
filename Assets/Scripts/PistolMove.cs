@@ -3,54 +3,47 @@ using System.Collections.Generic;
 using System;
 using UnityEngine;
 using UnityEngine.UI;
-using UnityEngine.SceneManagement;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 
 public class PistolMove : MonoBehaviour
 {
-    public GunMove playerScript; // Ссылка на скрипт игрока
+    public GunMove playerScript;
 
     [Header("Recoil Feel Settings")]
     [SerializeField] private float recoilMultiplier = 0.7f;
     [SerializeField] private float horizontalRecoilMultiplier = 0.6f;
     [SerializeField] private float verticalRecoilMultiplier = 0.85f;
-    [SerializeField] private float playerMass = 1.3f; // чуть тяжелее = приятнее контроль
-    [SerializeField] private float recoilForce = 7f; // Сила отдачи при выстреле
+    [SerializeField] private float playerMass = 1.3f;
+    [SerializeField] private float recoilForce = 7f;
 
-    public GameObject bulletPrefab; // Префаб пули
-    public float bulletSpeed = 15f; // Скорость пули
-    public Transform bulletSpawn; // Точка появления пули
+    public GameObject bulletPrefab;
+    public float bulletSpeed = 15f;
+    public Transform bulletSpawn;
+
+    [Header("Bullet Pool")]
+    public int bulletPoolSize = 20;
+    private Queue<GameObject> bulletPool = new Queue<GameObject>();
+    private Queue<Rigidbody2D> bulletRbPool = new Queue<Rigidbody2D>();
 
     [Header("Intended velocity estimator")]
-    public Vector2 intendedVelocity;           // «свободная» скорость (без учёта стен)
-    public float intendedVelFollow = 10f;      // насколько быстро тянем к факту
+    public Vector2 intendedVelocity;
+    public float intendedVelFollow = 10f;
 
-
-    [Header("Slow‑motion settings")]
-    [Range(0.05f, 1f)] public float slowMotionMinScale = 0.4f; // минимальное TimeScale
-    private float defaultSlowMotionMinScale = 0.4f;              // дефолтное значение
-    public bool slowMoModifierEnabled = false;                  // булева переменная для изменения
-    [Tooltip("Через сколько секунд удержания включаем плавное замедление")]
+    [Header("Slow-motion settings")]
+    [Range(0.05f, 1f)] public float slowMotionMinScale = 0.4f;
+    private float defaultSlowMotionMinScale = 0.4f;
+    public bool slowMoModifierEnabled = false;
     public float slowMotionDelay = 0.1f;
-    [Tooltip("Скорость, с которой TimeScale доходит до минимума (1/сек)")]
     public float slowMotionBuildSpeed = 2f;
     private float defaultSlowMotionBuildSpeed = 2f;
-    [Tooltip("Скорость возвращения TimeScale к 1 (1/сек)")]
     public float slowMotionReturnSpeed = 3f;
 
-    /*‑‑‑ Показатель визуального эффекта ‑‑‑*/
-    [Header("Post‑process (edge blur)")]
-    public Volume slowMoVolume;             // ссылка на Global Volume
-    [Range(0f, 1f)] public float blurMaxIntensity = 0.7f;
+    private bool timeIsModified = false;
+    private float holdTimer = 0.1f;
+    private float originalFixedDeltaTime;
 
-    private bool timeIsModified = false;     // сейчас TimeScale ≠ 1?
-    private float holdTimer = 0.1f;            // сколько держим кнопку
-    private float originalFixedDeltaTime;    // «эталон» для физики
-    private Vignette vignettePP;             // пост‑процессинг «размытие»
-
-
-    //Переменные для патронов
+    // ── Патроны ───────────────────────────────────────────────────────────────
     public int maxAmmo = 8;
     public int currentAmmo;
     public float reloadInterval = 0.5f;
@@ -58,172 +51,441 @@ public class PistolMove : MonoBehaviour
     public float boostDuration = 2f;
     private bool isBoosted = false;
     private float boostTimer = 0f;
-    // ИСПРАВЛЕНИЕ 1: флаг чтобы не запускать две корутины буста одновременно
     private bool isBoostCoroutineRunning = false;
 
-    // UI элементы для патронов
-    public GameObject[] ammoSlots; // Массив слотов патронов (8 слотов)
-    public Sprite fullAmmoSprite; // Спрайт заполненного патрона
-    public Sprite emptyAmmoSprite; // Спрайт пустого патрона
+    // ── Ammo UI ───────────────────────────────────────────────────────────────
+    [Header("Ammo UI")]
     public GameObject ammo;
-    public Slider reloadSlider; // Ссылка на слайдер перезарядки
+    public Sprite ammoSprite;
+    public Color ammoLoadedColor    = Color.white;
+    public Color ammoEmptyColor     = Color.black;
+    public Color ammoReloadingColor = new Color(1f, 0.65f, 0.1f, 1f);
+    public Color ammoBgOuterColor   = Color.black;
+    public Color ammoBgInnerColor   = new Color(0.25f, 0.25f, 0.25f, 1f);
+    public float ammoBgOuterPadding = 8f;
+    public float ammoBgInnerPadding = 4f;
+    public Vector2 ammoSlotSize     = new Vector2(28f, 40f);
+    public float ammoSlotSpacing    = 4f;
+    public int ammoMaxPerRow        = 15;
+
+    public Slider reloadSlider;
+
+    private Image[] ammoSlotImages;
+    private Image[] ammoFillImages;
+    private float reloadProgress  = 0f;
+    private int lastChargingSlot  = -1;
+    private float lastFillAmount  = 0f;
 
     private Rigidbody2D rb;
-    public Animator animator; // Ссылка на Animator компонент
-    public float lastAngle = 0f; // Последний угол поворота
-    public bool canShoot = false; // Может ли игрок стрелять
+    public Animator animator;
+    public float lastAngle = 0f;
+    public bool canShoot = false;
 
-    public CameraFollow cameraFollow; // Компонент CameraShake
-    public Image vignetteImage; // UI элемент для виньетки
-    public Color vignetteColor = new Color(0f, 0f, 0f, 0.1f); // Цвет виньетки
-    public float vignetteThreshold = 0.25f; // Порог для виньетки
-    public float vignetteMinIntensity = 0.1f; // Минимальная интенсивность виньетки
-    public float vignetteMaxIntensity = 0.3f; // Максимальная интенсивность виньетки
+    public CameraFollow cameraFollow;
 
-    public bool isWaitingToShoot = false; // Флаг ожидания стрельбы
+    // ── Виньетка (UI Image, без пост-процессинга) ─────────────────────────────
+    [Header("Vignette UI")]
+    [Tooltip("Растянутый на весь экран Image с чёрным цветом. Raycast Target — выключить.")]
+    public Image vignetteImage;
+    [Tooltip("Альфа виньетки когда магазин полный")]
+    public float vignetteMinAlpha  = 0.05f;
+    [Tooltip("Альфа виньетки когда магазин пустой")]
+    public float vignetteMaxAlpha  = 0.35f;
+    [Tooltip("Скорость плавного изменения альфы")]
+    public float vignetteSmoothing = 8f;
+    // Целевое значение альфы — пересчитывается при выстреле/перезарядке,
+    // сама Image обновляется плавно в Update — один Lerp вместо записи Color каждый кадр
+    private float vignetteTargetAlpha = 0f;
 
-    // Новые переменные для буста перезарядки
-    private float noFireTimer = 0f; // Таймер времени без стрельбы
-    public float noFireBoostThreshold = 2f; // Время без стрельбы для активации буста
+    public bool isWaitingToShoot = false;
 
-    private float fireCooldown = 0.14f; // Время между выстрелами
+    private float noFireTimer = 0f;
+    public float noFireBoostThreshold = 2f;
+
+    private float fireCooldown = 0.14f;
     private float lastFireTime = 0f;
 
-    [Header("Trap slow‑mo")]
-    [Tooltip("Минимальный TimeScale, когда игрок почти касается ловушки")]
-    [Range(0.02f,1f)] public float trapMaxSlowScale = 0.15f;
-    [Tooltip("Дальность, с которой начинаем замедлять")]
-    public float trapSlowRadius = 6f;          // м
-    [Tooltip("Дальность, когда замедление максимальное")]
-    public float trapMinDistance = 1f;         // м
+    [Header("Trap slow-mo")]
+    [Range(0.02f, 1f)] public float trapMaxSlowScale = 0.15f;
+    public float trapSlowRadius  = 6f;
+    public float trapMinDistance = 1f;
 
-    // кэшируем свой коллайдер для замеров дистанции до ловушек
+    private static readonly Collider2D[] trapHitBuffer = new Collider2D[32];
     private Collider2D selfCollider;
 
+    [Tooltip("Как часто (сек) проверять близость ловушек. 0.05 = 20 раз/сек")]
+    public float trapCheckInterval = 0.05f;
+    private float trapCheckTimer   = 0f;
+    private float cachedTrapScale  = 1f;
+
+    // ── Горизонтальное трение ─────────────────────────────────────────────────
+    [Header("Horizontal Friction")]
+    [Tooltip("Тормозит боковое скольжение. 0 = нет трения, 1-3 = аркадное ощущение.")]
+    public float horizontalDrag = 1.5f;
+
     public GameObject Saw;
+    public bool BabyMode = false;
 
-    public bool BabyMode = false; // Булевая переменная для режима «малыш»
-
-    public float sessionStartTime = 0f; // Когда игрок сделал первый выстрел
-    public bool sessionStarted = false; // Флаг, чтобы запускать только один раз
+    public float sessionStartTime = 0f;
+    public bool sessionStarted    = false;
     public event System.Action OnSessionStarted;
 
+    private Camera mainCamera;
 
+    private int pendingShotCount = 0;
+
+    private Vector2 aimDirection = Vector2.right;
+    private bool isPressingFire  = false;
+
+    // ═════════════════════════════════════════════════════════════════════════
     void Start()
     {
-        StopAllCoroutines(); // Остановить все корутины на этом объекте
-    
-        Input.ResetInputAxes(); // Сбросить нажатия перед началом игры
-        rb = GetComponent<Rigidbody2D>();
-        selfCollider = GetComponent<Collider2D>(); // кэшируем для GetTrapSlowScale
+        StopAllCoroutines();
+        Input.ResetInputAxes();
+
+        rb           = GetComponent<Rigidbody2D>();
+        selfCollider = GetComponent<Collider2D>();
+        mainCamera   = Camera.main;
+
         ammo.SetActive(false);
-        reloadSlider.gameObject.SetActive(false); // Скрыть слайдер в начале
+        if (reloadSlider != null) reloadSlider.gameObject.SetActive(false);
         Saw.SetActive(false);
 
-        currentAmmo = maxAmmo; // Инициализируем максимальным количеством патронов
-        vignetteImage.enabled = false;
-        UpdateAmmoUI(); // Обновляем UI патронов
-        StartCoroutine(Reload()); // Запускаем перезарядку
+        BuildAmmoUI();
+        InitBulletPool();
 
-        // Направляем курсор вправо от персонажа на старте
-        Vector2 initialCursorPosition = new Vector2(transform.position.x + 1f, transform.position.y);
-        Vector2 direction = initialCursorPosition - (Vector2)transform.position;
-        float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
-        transform.rotation = Quaternion.Euler(new Vector3(0, 0, angle));
+        currentAmmo    = maxAmmo;
+        reloadProgress = 0f;
+
+        if (vignetteImage != null) vignetteImage.enabled = false;
+
+        UpdateAmmoUI();
+        StartCoroutine(Reload());
+
+        aimDirection = Vector2.right;
+        ApplyAimRotation(aimDirection);
 
         canShoot = true;
-
-        // запоминаем дефолтный fixedDeltaTime
         originalFixedDeltaTime = Time.fixedDeltaTime;
 
-        // достаём Vignette из профиля
-        if (slowMoVolume != null)
-        {
-            slowMoVolume.profile.TryGet(out vignettePP);
-        }
-
-        if (vignettePP != null)
-        {
-            vignettePP.intensity.value = 0f;
-        }
-
         rb.mass = playerMass;
-
-        // ---------- BabyMode handler ----------
         ApplyBabyMode();
     }
 
+    void OnDestroy()
+    {
+        FlushPendingShots();
+    }
+
+    public void FlushPendingShots()
+    {
+        if (pendingShotCount <= 0) return;
+        PlayerPrefs.SetInt("TotalShots", PlayerPrefs.GetInt("TotalShots", 0) + pendingShotCount);
+        pendingShotCount = 0;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  ПОСТРОЕНИЕ UI ПАТРОННИКА
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    void BuildAmmoUI()
+    {
+        if (ammo == null) { Debug.LogError("PistolMove: назначь ammo!"); return; }
+
+        foreach (Transform child in ammo.transform)
+            Destroy(child.gameObject);
+
+        int perRow   = Mathf.Min(maxAmmo, ammoMaxPerRow);
+        int rowCount = Mathf.CeilToInt((float)maxAmmo / perRow);
+
+        float slotsW = perRow   * ammoSlotSize.x + (perRow   - 1) * ammoSlotSpacing;
+        float slotsH = rowCount * ammoSlotSize.y  + (rowCount - 1) * ammoSlotSpacing;
+
+        float outerW = slotsW + ammoBgOuterPadding * 2f;
+        float outerH = slotsH + ammoBgOuterPadding * 2f;
+        CreateUIRect("AmmoBg_Outer", ammo.transform, outerW, outerH, ammoBgOuterColor);
+        CreateUIRect("AmmoBg_Inner", ammo.transform,
+                     outerW - ammoBgInnerPadding * 2f,
+                     outerH - ammoBgInnerPadding * 2f, ammoBgInnerColor);
+
+        GameObject slotsRoot = new GameObject("AmmoSlotsRoot", typeof(RectTransform));
+        slotsRoot.transform.SetParent(ammo.transform, false);
+        RectTransform slotsRt = slotsRoot.GetComponent<RectTransform>();
+        slotsRt.sizeDelta        = new Vector2(slotsW, slotsH);
+        slotsRt.anchoredPosition = Vector2.zero;
+        slotsRt.anchorMin = slotsRt.anchorMax = slotsRt.pivot = new Vector2(0.5f, 0.5f);
+
+        ammoSlotImages = new Image[maxAmmo];
+        ammoFillImages = new Image[maxAmmo];
+
+        for (int i = 0; i < maxAmmo; i++)
+        {
+            int col = i % perRow;
+            int row = i / perRow;
+
+            // ИСПРАВЛЕНИЕ 1: центрирование — патроны симметричны относительно центра контейнера.
+            // Формула: позиция ячейки = её индекс * шаг, смещённый так чтобы
+            // первая ячейка и последняя были на одинаковом расстоянии от краёв.
+            float x =  col * (ammoSlotSize.x + ammoSlotSpacing) - (slotsW - ammoSlotSize.x) * 0.5f;
+            float y = -(row * (ammoSlotSize.y + ammoSlotSpacing) - (slotsH - ammoSlotSize.y) * 0.5f);
+
+            GameObject slotGo = new GameObject("S" + i, typeof(RectTransform));
+            slotGo.transform.SetParent(slotsRoot.transform, false);
+            RectTransform slotRt = slotGo.GetComponent<RectTransform>();
+            slotRt.sizeDelta        = ammoSlotSize;
+            slotRt.anchoredPosition = new Vector2(x, y);
+            slotRt.anchorMin = slotRt.anchorMax = slotRt.pivot = new Vector2(0.5f, 0.5f);
+
+            GameObject baseGo = new GameObject("B", typeof(RectTransform), typeof(Image));
+            baseGo.transform.SetParent(slotGo.transform, false);
+            Image baseImg = baseGo.GetComponent<Image>();
+            baseImg.sprite = ammoSprite;
+            baseImg.color  = ammoLoadedColor;
+            StretchToParent(baseGo.GetComponent<RectTransform>());
+            ammoSlotImages[i] = baseImg;
+
+            GameObject fillGo = new GameObject("F", typeof(RectTransform), typeof(Image));
+            fillGo.transform.SetParent(slotGo.transform, false);
+            Image fillImg = fillGo.GetComponent<Image>();
+            fillImg.sprite     = ammoSprite;
+            fillImg.color      = ammoReloadingColor;
+            fillImg.type       = Image.Type.Filled;
+            fillImg.fillMethod = Image.FillMethod.Vertical;
+            fillImg.fillOrigin = (int)Image.OriginVertical.Bottom;
+            fillImg.fillAmount = 0f;
+            StretchToParent(fillGo.GetComponent<RectTransform>());
+            ammoFillImages[i] = fillImg;
+        }
+    }
+
+    GameObject CreateUIRect(string name, Transform parent, float w, float h, Color color)
+    {
+        GameObject go = new GameObject(name, typeof(RectTransform), typeof(Image));
+        go.transform.SetParent(parent, false);
+        RectTransform rt = go.GetComponent<RectTransform>();
+        rt.sizeDelta        = new Vector2(w, h);
+        rt.anchoredPosition = Vector2.zero;
+        rt.anchorMin = rt.anchorMax = rt.pivot = new Vector2(0.5f, 0.5f);
+        go.GetComponent<Image>().color = color;
+        return go;
+    }
+
+    void StretchToParent(RectTransform rt)
+    {
+        rt.anchorMin = Vector2.zero; rt.anchorMax = Vector2.one;
+        rt.offsetMin = Vector2.zero; rt.offsetMax = Vector2.zero;
+        rt.anchoredPosition = Vector2.zero; rt.sizeDelta = Vector2.zero;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  ВИЗУАЛ ПАТРОНОВ
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    void UpdateAmmoUI()
+    {
+        if (ammoSlotImages == null) return;
+        for (int i = 0; i < ammoSlotImages.Length; i++)
+        {
+            if (ammoSlotImages[i] == null) continue;
+            ammoSlotImages[i].color      = (i < currentAmmo) ? ammoLoadedColor : ammoEmptyColor;
+            ammoFillImages[i].fillAmount = 0f;
+        }
+        lastChargingSlot = -1;
+        lastFillAmount   = 0f;
+
+        // Синхронизируем виньетку
+        UpdateVignetteTarget();
+    }
+
+    void SetSlotReloadProgress(int slotIndex, float progress)
+    {
+        if (ammoSlotImages == null) return;
+        if (slotIndex < 0 || slotIndex >= ammoSlotImages.Length) return;
+
+        if (lastChargingSlot != slotIndex && lastChargingSlot >= 0
+            && lastChargingSlot < ammoFillImages.Length)
+            ammoFillImages[lastChargingSlot].fillAmount = 0f;
+
+        if (Mathf.Abs(progress - lastFillAmount) > 0.005f || lastChargingSlot != slotIndex)
+        {
+            ammoSlotImages[slotIndex].color      = ammoEmptyColor;
+            ammoFillImages[slotIndex].fillAmount = progress;
+            lastChargingSlot = slotIndex;
+            lastFillAmount   = progress;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  ВИНЬЕТКА
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    // Обновляет только целевое значение альфы — без записи в Image.color.
+    // Реальное обновление происходит в Update через один Lerp.
+    void UpdateVignetteTarget()
+    {
+        float t = maxAmmo > 0 ? 1f - (float)currentAmmo / maxAmmo : 0f;
+        vignetteTargetAlpha = Mathf.Lerp(vignetteMinAlpha, vignetteMaxAlpha, t);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  ПУЛ ПУЛЬ
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    void InitBulletPool()
+    {
+        for (int i = 0; i < bulletPoolSize; i++)
+        {
+            GameObject b = Instantiate(bulletPrefab);
+            b.SetActive(false);
+            bulletPool.Enqueue(b);
+            bulletRbPool.Enqueue(b.GetComponent<Rigidbody2D>());
+        }
+    }
+
+    bool GetBulletFromPool(out GameObject bullet, out Rigidbody2D bulletRb)
+    {
+        if (bulletPool.Count > 0)
+        {
+            bullet   = bulletPool.Dequeue();
+            bulletRb = bulletRbPool.Dequeue();
+            bullet.SetActive(true);
+            return true;
+        }
+        bullet   = Instantiate(bulletPrefab);
+        bulletRb = bullet.GetComponent<Rigidbody2D>();
+        return true;
+    }
+
+    public void ReturnBulletToPool(GameObject bullet)
+    {
+        bullet.SetActive(false);
+        bulletPool.Enqueue(bullet);
+        bulletRbPool.Enqueue(bullet.GetComponent<Rigidbody2D>());
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  ПРИЦЕЛИВАНИЕ
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    void UpdateAim()
+    {
+        Vector3 rawMousePos = Input.mousePosition;
+        if (!IsMousePositionValid(rawMousePos)) return;
+
+        Vector2 cursorWorld = mainCamera.ScreenToWorldPoint(rawMousePos);
+        Vector2 dir = cursorWorld - (Vector2)transform.position;
+        if (dir.sqrMagnitude < 0.0001f) return;
+
+        aimDirection = dir.normalized;
+        ApplyAimRotation(aimDirection);
+    }
+
+    void ApplyAimRotation(Vector2 dir)
+    {
+        float angle = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
+        transform.rotation = Quaternion.Euler(0, 0, angle);
+        FlipCharacter(angle);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  FIXED UPDATE — горизонтальное трение
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    void FixedUpdate()
+    {
+        // ИСПРАВЛЕНИЕ 2: горизонтальное трение.
+        // Гасим только X-компоненту скорости — вертикаль (гравитация + отдача вверх)
+        // не трогаем. Экспоненциальное затухание: vx *= (1 - drag * dt) каждый шаг.
+        if (horizontalDrag > 0f)
+        {
+            Vector2 vel = rb.linearVelocity;
+            vel.x *= Mathf.Clamp01(1f - horizontalDrag * Time.fixedDeltaTime);
+            rb.linearVelocity = vel;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  UPDATE
+    // ═══════════════════════════════════════════════════════════════════════════
+
     void Update()
     {
-        // Обновляем минимальный Slow Motion, если включен модификатор
         if (slowMoModifierEnabled)
         {
-            slowMotionMinScale = defaultSlowMotionMinScale - 0.35f;
-            if (slowMotionMinScale < 0.01f) slowMotionMinScale = 0.01f; // защита от отрицательного значения
-            slowMotionBuildSpeed = defaultSlowMotionBuildSpeed + 1f;
-            if (slowMotionBuildSpeed < 0.01f) slowMotionBuildSpeed = 0.01f; // защита от отрицательного значения
+            slowMotionMinScale   = Mathf.Max(0.01f, defaultSlowMotionMinScale - 0.35f);
+            slowMotionBuildSpeed = Mathf.Max(0.01f, defaultSlowMotionBuildSpeed + 1f);
         }
         else
         {
-            slowMotionMinScale = defaultSlowMotionMinScale;
+            slowMotionMinScale   = defaultSlowMotionMinScale;
             slowMotionBuildSpeed = defaultSlowMotionBuildSpeed;
         }
 
-        // ---------- Slow‑motion handler (NEW) ----------
         HandleSlowMotion();
-        // ------------------------------------------------
-
 
         if (canShoot && !isWaitingToShoot)
         {
-            // Получаем позицию курсора
-            Vector2 cursorPosition = Camera.main.ScreenToWorldPoint(Input.mousePosition);
-            // Вычисляем направление к курсору
-            Vector2 direction = cursorPosition - (Vector2)transform.position;
-            // Поворачиваем персонажа в направлении курсора
-            float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
-            transform.rotation = Quaternion.Euler(new Vector3(0, 0, angle));
+            bool mouseDown = Input.GetMouseButtonDown(0);
+            bool mouseHeld = Input.GetMouseButton(0);
+            bool mouseUp   = Input.GetMouseButtonUp(0);
 
-            // Отзеркаливаем персонажа относительно оси Y
-            FlipCharacter(angle);
+            if (mouseDown || mouseHeld)
+                UpdateAim();
 
-            if (Input.GetMouseButtonUp(0) && Time.unscaledTime >= lastFireTime + fireCooldown) // При отпускании кнопки
+            if (mouseUp && Time.unscaledTime >= lastFireTime + fireCooldown)
             {
-                Fire(direction);
-                lastFireTime = Time.unscaledTime; // важно считать в реальном времени
+                Fire(aimDirection);
+                lastFireTime = Time.unscaledTime;
                 playerScript.StartText.SetActive(false);
                 ammo.SetActive(true);
                 playerScript.PauseButton.SetActive(true);
                 Saw.SetActive(true);
-
-                // Сбрасываем таймер без стрельбы
                 noFireTimer = 0f;
-
-                // Обрабатываем объекты при выстреле
                 playerScript.HandleObjectsOnShot();
             }
         }
 
-        // Обновляем таймер без стрельбы
         if (canShoot)
         {
             noFireTimer += Time.deltaTime;
             if (noFireTimer >= noFireBoostThreshold && !isBoosted)
-            {
                 StartCoroutine(StartBoostReload());
-            }
         }
 
-        // немного «пришиваем» оценку к реальной скорости, чтобы не разъезжалась
-        intendedVelocity = Vector2.MoveTowards(intendedVelocity, rb.linearVelocity, intendedVelFollow * Time.deltaTime);
+        trapCheckTimer += Time.unscaledDeltaTime;
+        if (trapCheckTimer >= trapCheckInterval)
+        {
+            trapCheckTimer  = 0f;
+            cachedTrapScale = GetTrapSlowScale();
+        }
 
+        intendedVelocity = Vector2.MoveTowards(
+            intendedVelocity, rb.linearVelocity, intendedVelFollow * Time.deltaTime);
+
+        // ИСПРАВЛЕНИЕ 3: плавное обновление виньетки — один Lerp в Update
+        // вместо записи Color при каждом выстреле/перезарядке
+        if (vignetteImage != null)
+        {
+            Color c = vignetteImage.color;
+            float newAlpha = Mathf.Lerp(c.a, vignetteTargetAlpha,
+                                         vignetteSmoothing * Time.deltaTime);
+            if (Mathf.Abs(newAlpha - c.a) > 0.001f)
+            {
+                c.a = newAlpha;
+                vignetteImage.color   = c;
+                vignetteImage.enabled = c.a > 0.005f;
+            }
+        }
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  SLOW MOTION
+    // ═══════════════════════════════════════════════════════════════════════════
 
     void HandleSlowMotion()
     {
-        if (!canShoot) return;               // пауза / меню
+        if (!canShoot) return;
 
-        /* A. Aim‑slow‑mo ------------------------------------------------*/
         float aimScale;
         if (Input.GetMouseButton(0))
         {
@@ -233,7 +495,6 @@ public class PistolMove : MonoBehaviour
             float t = 0f;
             if (holdTimer > slowMotionDelay)
                 t = Mathf.Clamp01((holdTimer - slowMotionDelay) * slowMotionBuildSpeed);
-
             aimScale = Mathf.Lerp(1f, slowMotionMinScale, t);
         }
         else
@@ -242,276 +503,196 @@ public class PistolMove : MonoBehaviour
                         Time.unscaledDeltaTime * slowMotionReturnSpeed);
         }
 
-        /* B. Trap‑slow‑mo -----------------------------------------------*/
-        float trapScale = GetTrapSlowScale();         // 1 … trapMaxSlowScale
-
-        /* C. Итог --------------------------------------------------------*/
-        float finalScale = Mathf.Min(aimScale, trapScale);
-        ApplyTimeScale(finalScale);
+        ApplyTimeScale(Mathf.Min(aimScale, cachedTrapScale));
     }
 
     public void ApplyBabyMode()
     {
         Vector3 scale = transform.localScale;
-
-        float signY = Mathf.Sign(scale.y); // сохраняем флип
-
+        float signY = Mathf.Sign(scale.y);
         if (BabyMode)
         {
-            scale.x = 0.65f;
-            scale.y = signY * 0.65f;
-            scale.z = 0.65f;
-            recoilForce = 15.5f;
-            playerMass = 1.2f;
+            scale.x = 0.65f; scale.y = signY * 0.65f; scale.z = 0.65f;
+            recoilForce = 15.5f; playerMass = 1.2f;
         }
         else
         {
-            scale.x = 0.8f;
-            scale.y = signY * 0.8f;
-            scale.z = 0.8f;
-            recoilForce = 12.5f;
-            playerMass = 1.4f;
+            scale.x = 0.8f; scale.y = signY * 0.8f; scale.z = 0.8f;
+            recoilForce = 12.5f; playerMass = 1.4f;
         }
-
         transform.localScale = scale;
     }
 
     float GetTrapSlowScale()
     {
-        float minDist = trapSlowRadius + 0.01f;       // чуть > радиуса
+        float minDist = trapSlowRadius + 0.01f;
+        int count = Physics2D.OverlapCircleNonAlloc(transform.position, trapSlowRadius, trapHitBuffer);
 
-        // берём все коллайдеры в круге; тег фильтруем вручную
-        Collider2D[] hits = Physics2D.OverlapCircleAll(transform.position, trapSlowRadius);
-        foreach (var col in hits)
+        for (int i = 0; i < count; i++)
         {
-            if (col.CompareTag("Dead") || col.CompareTag("DeadlyBlock"))
-            {
-                // ИСПРАВЛЕНИЕ 4: измеряем дистанцию до ближайшей точки коллайдера,
-                // а не до пивота объекта — корректно для больших врагов и блоков
-                if (selfCollider != null)
-                {
-                    ColliderDistance2D colDist = selfCollider.Distance(col);
-                    float d = colDist.distance;
-                    if (d < minDist) minDist = d;
-                }
-                else
-                {
-                    float d = Vector2.Distance(transform.position, col.transform.position);
-                    if (d < minDist) minDist = d;
-                }
-            }
+            Collider2D col = trapHitBuffer[i];
+            if (!col.CompareTag("Dead") && !col.CompareTag("DeadlyBlock")) continue;
+
+            float roughDist = Vector2.Distance(transform.position, col.transform.position);
+            if (roughDist >= minDist + 2f) continue;
+
+            float d = selfCollider != null
+                ? selfCollider.Distance(col).distance
+                : roughDist;
+            if (d < minDist) minDist = d;
         }
 
-        if (minDist > trapSlowRadius) return 1f;      // ловушек поблизости нет
-
-        float t = Mathf.InverseLerp(trapSlowRadius, trapMinDistance, minDist); // 0→1
-        return Mathf.Lerp(1f, trapMaxSlowScale, t);   // 1 … trapMaxSlowScale
+        if (minDist > trapSlowRadius) return 1f;
+        return Mathf.Lerp(1f, trapMaxSlowScale,
+               Mathf.InverseLerp(trapSlowRadius, trapMinDistance, minDist));
     }
 
-    /* — вспомогательный: выставляет TimeScale и пост‑эффект — */
     void ApplyTimeScale(float value)
     {
         if (Mathf.Approximately(Time.timeScale, value)) return;
-
         Time.timeScale      = value;
         Time.fixedDeltaTime = originalFixedDeltaTime * value;
         timeIsModified      = !Mathf.Approximately(value, 1f);
-
-        if (vignettePP != null)
-        {
-            float minPossible = Mathf.Min(slowMotionMinScale, trapMaxSlowScale);
-            float t = Mathf.InverseLerp(1f, minPossible, value);
-
-            // ❗ если нет slow-mo — полностью выключаем
-            if (Mathf.Approximately(value, 1f))
-            {
-                vignettePP.intensity.value = 0f;
-            }
-            else
-            {
-                float targetIntensity = Mathf.Lerp(0f, blurMaxIntensity, t);
-
-                vignettePP.intensity.value = Mathf.Lerp(
-                    vignettePP.intensity.value,
-                    targetIntensity,
-                    Time.unscaledDeltaTime * 10f
-                );
-            }
-
-            vignettePP.smoothness.value = 1f;
-        }
     }
 
     public void ForceStopSlowMotion()
     {
-        // Полностью обнуляем «буллет‑тайм», если он был
-        ApplyTimeScale(1f);         // вернёт Time.timeScale и blur к 1
+        ApplyTimeScale(1f);
         timeIsModified = false;
         holdTimer      = 0f;
     }
 
-
-    void FlipCharacter(float currentAngle)
+    bool IsMousePositionValid(Vector3 p)
     {
-        if ((currentAngle > 90f || currentAngle < -90f) != (lastAngle > 90f || lastAngle < -90f))
-        {
-            transform.localScale = new Vector3(transform.localScale.x, -transform.localScale.y, transform.localScale.z);
-        }
-        lastAngle = currentAngle;
+        if (float.IsNaN(p.x)      || float.IsNaN(p.y))      return false;
+        if (float.IsInfinity(p.x) || float.IsInfinity(p.y)) return false;
+        if (p.x < 0 || p.y < 0)                              return false;
+        if (p.x > Screen.width || p.y > Screen.height)       return false;
+        return true;
     }
+
+    void FlipCharacter(float angle)
+    {
+        bool facingLeft = angle > 90f || angle < -90f;
+        bool wasLeft    = lastAngle > 90f || lastAngle < -90f;
+        if (facingLeft != wasLeft)
+            transform.localScale = new Vector3(
+                transform.localScale.x, -transform.localScale.y, transform.localScale.z);
+        lastAngle = angle;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  ВЫСТРЕЛ
+    // ═══════════════════════════════════════════════════════════════════════════
 
     void Fire(Vector2 direction)
     {
         if (!sessionStarted)
         {
-            sessionStartTime = Time.time; // Запоминаем время начала
-            sessionStarted = true;
+            sessionStartTime = Time.time;
+            sessionStarted   = true;
             OnSessionStarted?.Invoke();
         }
 
-        if (currentAmmo > 0)
-        {
-            direction.Normalize();
-            PlayerPrefs.SetInt("TotalShots", PlayerPrefs.GetInt("TotalShots", 0) + 1);
+        if (currentAmmo <= 0) return;
 
-            GameObject bullet = Instantiate(bulletPrefab, bulletSpawn.position, Quaternion.identity);
-            Rigidbody2D bulletRb = bullet.GetComponent<Rigidbody2D>();
-            bulletRb.linearVelocity = direction * bulletSpeed;
+        direction.Normalize();
 
-            float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
-            bullet.transform.rotation = Quaternion.Euler(new Vector3(0, 0, angle));
+        pendingShotCount++;
+        if (pendingShotCount >= 10) FlushPendingShots();
 
-            // ИСПРАВЛЕНИЕ 2: гасим компоненту скорости, противоположную отдаче,
-            // чтобы feel выстрела был стабильным независимо от текущей скорости персонажа
-            Vector2 recoilDir = -direction;
-            float currentAlongRecoil = Vector2.Dot(rb.linearVelocity, recoilDir);
-            if (currentAlongRecoil < 0)
-            {
-                rb.linearVelocity -= recoilDir * currentAlongRecoil;
-            }
+        GetBulletFromPool(out GameObject bullet, out Rigidbody2D bulletRb);
+        bullet.transform.SetPositionAndRotation(
+            bulletSpawn.position,
+            Quaternion.Euler(0, 0, Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg));
+        bulletRb.linearVelocity = direction * bulletSpeed;
 
-            Vector2 recoil = new Vector2(
-                recoilDir.x * horizontalRecoilMultiplier,
-                recoilDir.y * verticalRecoilMultiplier
-            );
+        Vector2 recoilDir = -direction;
+        float along = Vector2.Dot(rb.linearVelocity, recoilDir);
+        if (along < 0) rb.linearVelocity -= recoilDir * along;
 
-            // нормализуем чтобы не ломалась сила по диагонали
-            recoil = recoil.normalized;
+        Vector2 recoil = new Vector2(
+            recoilDir.x * horizontalRecoilMultiplier,
+            recoilDir.y * verticalRecoilMultiplier).normalized;
+        rb.AddForce(recoil * recoilForce * recoilMultiplier, ForceMode2D.Impulse);
 
-            rb.AddForce(recoil * recoilForce * recoilMultiplier, ForceMode2D.Impulse);
+        Vector2 dv = recoilDir * recoilForce / rb.mass;
+        intendedVelocity += dv;
+        if (intendedVelocity.magnitude > playerScript.maxSpeed)
+            intendedVelocity = intendedVelocity.normalized * playerScript.maxSpeed;
+        if (rb.linearVelocity.magnitude > playerScript.maxSpeed)
+            rb.linearVelocity = rb.linearVelocity.normalized * playerScript.maxSpeed;
 
+        currentAmmo--;
+        UpdateAmmoUI(); // внутри вызывает UpdateVignetteTarget
 
-            // Δv от импульса отдачи (импульс / масса)
-            Vector2 dv = recoilDir * recoilForce / rb.mass;
-            intendedVelocity += dv;
+        if (currentAmmo == 0 && !isBoosted)
+            StartCoroutine(StartBoostReload());
 
-            // такой же кламп, как у реальной скорости
-            if (intendedVelocity.magnitude > playerScript.maxSpeed)
-                intendedVelocity = intendedVelocity.normalized * playerScript.maxSpeed;
+        cameraFollow.SetShake(Mathf.Lerp(0.1f, 0.16f, 1f - (float)currentAmmo / maxAmmo), 0.1f);
 
-            if (rb.linearVelocity.magnitude > playerScript.maxSpeed)
-            {
-                rb.linearVelocity = rb.linearVelocity.normalized * playerScript.maxSpeed;
-            }
-
-            currentAmmo--;
-            UpdateAmmoUI();
-
-            // ИСПРАВЛЕНИЕ 1: используем флаг isBoostCoroutineRunning вместо только isBoosted,
-            // чтобы не запустить две корутины одновременно (когда патроны кончились
-            // и одновременно сработал noFireBoostThreshold)
-            if (currentAmmo == 0 && !isBoosted)
-            {
-                StartCoroutine(StartBoostReload());
-            }
-
-            float shakeIntensity = Mathf.Lerp(0.1f, 0.16f, 1 - (float)currentAmmo / maxAmmo);
-            cameraFollow.SetShake(shakeIntensity, 0.1f);
-
-            float vignetteIntensity = Mathf.Lerp(vignetteMinIntensity, vignetteMaxIntensity, 1 - (float)currentAmmo / maxAmmo);
-            vignetteImage.color = new Color(vignetteColor.r, vignetteColor.g, vignetteColor.b, vignetteIntensity);
-            vignetteImage.enabled = true;
-
-            if (animator != null)
-            {
-                animator.Play("Shoot", 0, 0f);
-            }
-        }
+        if (animator != null) animator.Play("Shoot", 0, 0f);
     }
 
-    // ----- ниже код перезарядки, UI и т.д. без изменений -----
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  ПЕРЕЗАРЯДКА
+    // ═══════════════════════════════════════════════════════════════════════════
+
     IEnumerator Reload()
     {
         while (true)
         {
-            float interval = isBoosted ? boostedReloadInterval : reloadInterval;
-
             if (currentAmmo < maxAmmo)
             {
-                reloadSlider.gameObject.SetActive(true);
-                reloadSlider.value = 0;
-                float elapsedTime = 0f;
+                float interval = isBoosted ? boostedReloadInterval : reloadInterval;
+                float elapsed  = reloadProgress * interval;
 
-                while (elapsedTime < interval)
+                while (elapsed < interval)
                 {
-                    elapsedTime += Time.deltaTime;
-                    reloadSlider.value = elapsedTime / interval;
+                    int chargingSlot = currentAmmo;
+                    elapsed       += Time.deltaTime;
+                    reloadProgress = Mathf.Clamp01(elapsed / interval);
+                    SetSlotReloadProgress(chargingSlot, reloadProgress);
+
+                    float newInterval = isBoosted ? boostedReloadInterval : reloadInterval;
+                    if (!Mathf.Approximately(newInterval, interval))
+                    {
+                        elapsed  = reloadProgress * newInterval;
+                        interval = newInterval;
+                    }
+
                     yield return null;
                 }
 
-                if (currentAmmo < maxAmmo)
-                {
-                    currentAmmo++;
-                    UpdateAmmoUI();
-                    float vignetteIntensity = Mathf.Lerp(vignetteMinIntensity, vignetteMaxIntensity, 1 - (float)currentAmmo / maxAmmo);
-                    vignetteImage.color = new Color(vignetteColor.r, vignetteColor.g, vignetteColor.b, vignetteIntensity);
-                    vignetteImage.enabled = true;
-                }
+                reloadProgress = 0f;
+                currentAmmo++;
+                UpdateAmmoUI(); // внутри вызывает UpdateVignetteTarget
             }
             else
             {
-                reloadSlider.gameObject.SetActive(false);
+                reloadProgress = 0f;
             }
 
             if (isBoosted)
             {
+                float interval = isBoosted ? boostedReloadInterval : reloadInterval;
                 boostTimer += interval;
-                if (boostTimer >= boostDuration)
-                {
-                    isBoosted = false;
-                    boostTimer = 0f;
-                }
+                if (boostTimer >= boostDuration) { isBoosted = false; boostTimer = 0f; }
             }
 
             yield return null;
         }
     }
 
-    // ИСПРАВЛЕНИЕ 1: добавлен флаг isBoostCoroutineRunning — защита от двойного запуска
     IEnumerator StartBoostReload()
     {
         if (isBoostCoroutineRunning) yield break;
         isBoostCoroutineRunning = true;
-        isBoosted = true;
+        isBoosted  = true;
         boostTimer = 0f;
         yield return new WaitForSeconds(boostDuration);
-        isBoosted = false;
+        isBoosted  = false;
         boostTimer = 0f;
         isBoostCoroutineRunning = false;
-    }
-
-    void UpdateAmmoUI()
-    {
-        for (int i = 0; i < ammoSlots.Length; i++)
-        {
-            if (i < currentAmmo)
-            {
-                ammoSlots[i].GetComponent<Image>().sprite = fullAmmoSprite;
-            }
-            else
-            {
-                ammoSlots[i].GetComponent<Image>().sprite = emptyAmmoSprite;
-            }
-        }
     }
 }

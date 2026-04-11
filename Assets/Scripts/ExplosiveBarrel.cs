@@ -17,7 +17,7 @@ public class ExplosiveBarrel : MonoBehaviour
 
     private void Start() 
     {
-        cameraFollow = FindObjectOfType<CameraFollow>(); // Находим камеру с классом CameraFollow
+        cameraFollow = FindFirstObjectByType<CameraFollow>(); // Находим камеру с классом CameraFollow
     }
 
     private void OnTriggerEnter2D(Collider2D collision)
@@ -95,7 +95,7 @@ public class ExplosiveBarrel : MonoBehaviour
                         PlayerPrefs.SetInt("TotalKills", PlayerPrefs.GetInt("TotalKills", 0) + 1);
 
                         // Обновить прогресс на слотах (если магазин открыт)
-                        foreach (var item in FindObjectsOfType<ShopItemUI>())
+                        foreach (var item in FindObjectsByType<ShopItemUI>(FindObjectsSortMode.None))
                         {
                             item.UpdateProgressFromPrefs();
                             item.TryAutoUnlock();

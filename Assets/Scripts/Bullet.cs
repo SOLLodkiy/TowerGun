@@ -6,6 +6,9 @@ using UnityEngine.UI;
 public class Bullet : MonoBehaviour
 {
     public float lifetime = 1f; // Время жизни пули
+    [Tooltip("Время (сек), в течение которого пуля не может убить игрока после вылета")]
+    public float safeTime = 0.1f; 
+    
     public GameObject explosionEffect; // Префаб эффекта распада пули
     public GameObject coinEffectPrefab; // Префаб эффекта монет
     private GameObject selfshot; // Префаб UI самовыстрел
@@ -13,8 +16,13 @@ public class Bullet : MonoBehaviour
     private SelfShot selfshotScript; // Ссылка на скрипт игрока
     private static bool selfshotDisabled = false; // Флаг для проверки, выполнено ли действие
 
+    private float spawnTime; // Время появления пули
+
     void Start()
     {
+        // Запоминаем точное время появления
+        spawnTime = Time.time;
+
         // Уничтожаем пулю через заданное время
         Destroy(gameObject, lifetime);
 
@@ -24,17 +32,20 @@ public class Bullet : MonoBehaviour
         if (player != null)
         {
             playerScript = player.GetComponent<GunMove>();
-            selfshotScript = canvas.GetComponent<SelfShot>();
-            if (selfshotScript != null)
+            if (canvas != null)
             {
-                selfshot = selfshotScript.selfshot;
-            }   
+                selfshotScript = canvas.GetComponent<SelfShot>();
+                if (selfshotScript != null)
+                {
+                    selfshot = selfshotScript.selfshot;
+                }
+            }
         }
 
         if (!selfshotDisabled && selfshot != null)
         {
             selfshot.SetActive(false);
-            selfshotDisabled = true; // Устанавливаем флаг, чтобы больше не выполнять
+            selfshotDisabled = true;
         }
     }
 
@@ -42,37 +53,36 @@ public class Bullet : MonoBehaviour
     {
         if (other.CompareTag("WoodenPlatform") || other.CompareTag("Dead") || other.CompareTag("Coin") || other.CompareTag("ExplosiveBarrel") || other.CompareTag("EditorOnly"))
         {
-            // Игнорируем коллизию с платформами
             Physics2D.IgnoreCollision(other, GetComponent<Collider2D>());
-            return; // Не уничтожаем пулю
+            return;
         }
-        // Если пуля сталкивается с врагом
         else if (other.CompareTag("Enemy"))
         {
-            // Передаем событие для врага
-            other.GetComponent<EnemyPlatform>().KilledByPlayer();  // Вызов метода смерти врага
+            other.GetComponent<EnemyPlatform>().KilledByPlayer();
             other.GetComponent<EnemyPlatform>().Die();
-            // Удаляем пулю
-            Destroy(gameObject);  // Или выключаем пулю
+            Destroy(gameObject);
         }
         else if (other.CompareTag("Player") && gameObject.CompareTag("PlayerBullet"))
         {
-            // Включаем надпись выстрел в себя
-            selfshot.SetActive(true);
-            Destroy(gameObject);
-            // Получаем скрипт GunMove и отключаем игрока
+            // ПРОВЕРКА: Если прошло меньше времени, чем safeTime — игнорируем столкновение
+            if (Time.time - spawnTime < safeTime)
+            {
+                return; 
+            }
+
+            // Если пуля «старая» (вылетела давно) — убиваем игрока
+            if (selfshot != null) selfshot.SetActive(true);
+            
             GunMove player = other.GetComponent<GunMove>();
             if (player != null)
             {
-                selfshot.SetActive(true);
                 player.DisablePlayer();
-                selfshot.SetActive(true);
             }
-            selfshot.SetActive(true);
+            
+            Destroy(gameObject);
         }
         else
         {
-            // Создаем эффект распада пули при столкновении с другими объектами
             CreateExplosionEffect();
             Destroy(gameObject);
         }
@@ -82,20 +92,20 @@ public class Bullet : MonoBehaviour
     {
         if (explosionEffect != null)
         {
-        // Создаем эффект распада пули
-        GameObject explosion = Instantiate(explosionEffect, transform.position, Quaternion.identity);
-        
-        // Получаем компонент системы частиц
-        ParticleSystem particleSystem = explosion.GetComponent<ParticleSystem>();
-        if (particleSystem != null)
-        {
-            // Настройка направления частиц
-            ParticleSystem.MainModule main = particleSystem.main;
-            main.startRotation = Mathf.Atan2(GetComponent<Rigidbody2D>().linearVelocity.y, GetComponent<Rigidbody2D>().linearVelocity.x);
-        }
-        
-        // Уничтожаем эффект через некоторое время
-        Destroy(explosion, particleSystem.main.duration);
+            GameObject explosion = Instantiate(explosionEffect, transform.position, Quaternion.identity);
+            ParticleSystem particleSystem = explosion.GetComponent<ParticleSystem>();
+            if (particleSystem != null)
+            {
+                ParticleSystem.MainModule main = particleSystem.main;
+                // Небольшая правка: используем velocity2D для направления частиц
+                Vector2 vel = GetComponent<Rigidbody2D>().linearVelocity;
+                main.startRotation = Mathf.Atan2(vel.y, vel.x);
+                Destroy(explosion, main.duration);
+            }
+            else
+            {
+                Destroy(explosion, 1f);
+            }
         }
     }
 }

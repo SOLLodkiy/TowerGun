@@ -9,8 +9,7 @@ public class WrapAround : MonoBehaviour
 
     public bool canWrapAround = false;
     public bool inWall = false;
-    public float bounceFactor = 1.4f;
-    private float wallStayTimer = 0f;
+    public float bounceFactor = 1.36f;
     [SerializeField] private float wallPushForce = 2f;
 
     private Rigidbody2D rb;
@@ -79,7 +78,6 @@ public class WrapAround : MonoBehaviour
         if (collision.gameObject.layer == LayerMask.NameToLayer("Wall"))
         {
             inWall = false;
-            wallStayTimer = 0f;
         }
     }
 

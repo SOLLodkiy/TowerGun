@@ -5,21 +5,21 @@ using UnityEngine.UI;
 
 public class ImminentDanger : MonoBehaviour
 {
-    [Header("Distance‑based speed")]
-    public float farDistance   = 10f;   // ≥ — самая высокая ступень
-    public float closeDistance = 5f;
-    public float soCloseDistance = 2f;  // ≤ — самая низкая ступень
+    [Header("Distance-based speed")]
+    public float farDistance    = 10f;
+    public float closeDistance  = 5f;
+    public float soCloseDistance = 2f;
 
     [Header("Base speed values (by distance)")]
-    public float speedFar      = 6f;    // когда очень далеко
-    public float speedMid      = 3f;    // средняя дистанция
-    public float speedNear     = 2f;    // близко
-    public float speedSoClose  = 1.5f;  // почти вплотную
+    public float speedFar     = 6f;
+    public float speedMid     = 3f;
+    public float speedNear    = 2f;
+    public float speedSoClose = 1.5f;
 
     [Header("Progression (extra speed)")]
-    public float extraStart    = 0f;    // начальный бонус
-    public float extraGrowPerSec = 0.05f; // на сколько растёт каждую секунду
-    public float extraMax      = 4f;    // «потолок» бонуса
+    public float extraStart      = 0f;
+    public float extraGrowPerSec = 0.05f;
+    public float extraMax        = 4f;
 
     [Header("Links / UI")]
     public Transform player;
@@ -27,77 +27,90 @@ public class ImminentDanger : MonoBehaviour
     public Image redWarning;
     public Camera mainCamera;
 
-    private float extraSpeed;           // растущий бонус
-    private float currentSpeed;         // итоговая скорость = base + extra
+    private float extraSpeed;
     public float speedSaw;
+
+    // ОПТИМИЗАЦИЯ: кэшируем transform пилы
+    private Transform selfTransform;
+
+    // ОПТИМИЗАЦИЯ: UI предупреждений меняется редко — отслеживаем состояние
+    // чтобы не вызывать SetActive каждый кадр (SetActive дорогой вызов)
+    private enum WarningState { None, Yellow, Red }
+    private WarningState currentWarningState = WarningState.None;
+
+    // ОПТИМИЗАЦИЯ: цвет redWarning меняется только при смене isInCamera —
+    // кэшируем последнее состояние чтобы не писать в Image.color каждый кадр
+    private bool lastInCameraState = false;
+    private bool redWasActive = false;
 
     void Start()
     {
-        extraSpeed = extraStart;
+        extraSpeed    = extraStart;
+        selfTransform = transform;
     }
 
     void Update()
     {
-        /* 1. растим бонус со временем */
         extraSpeed = Mathf.Min(extraSpeed + extraGrowPerSec * Time.deltaTime, extraMax);
 
-        /* 2. выбираем базовую скорость по дистанции до игрока */
-        float distance = Vector3.Distance(transform.position, player.position);
+        // ОПТИМИЗАЦИЯ: sqrMagnitude дешевле чем Vector3.Distance (нет sqrt)
+        // Используем только по Y так как пила движется вертикально
+        float distance = Mathf.Abs(selfTransform.position.y - player.position.y);
 
         float baseSpeed;
-        if      (distance >= farDistance)                 baseSpeed = speedFar;
-        else if (distance >= closeDistance)               baseSpeed = speedMid;
-        else if (distance >= soCloseDistance)             baseSpeed = speedNear;
-        else                                              baseSpeed = speedSoClose;
+        if      (distance >= farDistance)   baseSpeed = speedFar;
+        else if (distance >= closeDistance) baseSpeed = speedMid;
+        else if (distance >= soCloseDistance) baseSpeed = speedNear;
+        else                                baseSpeed = speedSoClose;
 
-        /* 3. окончательная скорость пилы */
-        currentSpeed = baseSpeed + extraSpeed;            // ← вся «магия» прогрессии
-        transform.Translate(Vector3.up * currentSpeed * Time.deltaTime);
+        float currentSpeed = baseSpeed + extraSpeed;
+        selfTransform.Translate(Vector3.up * currentSpeed * Time.deltaTime);
 
-        /* 4. предупреждения на экране */
         HandleUI(distance);
-
         speedSaw = currentSpeed;
     }
 
     void HandleUI(float d)
     {
-        if (d < soCloseDistance)
+        WarningState needed;
+        if      (d < soCloseDistance) needed = WarningState.Red;
+        else if (d < closeDistance)   needed = WarningState.Yellow;
+        else                          needed = WarningState.None;
+
+        // ОПТИМИЗАЦИЯ: SetActive только при реальном изменении состояния
+        if (needed != currentWarningState)
         {
-            yellowWarning.gameObject.SetActive(false);
-            redWarning.gameObject.SetActive(true);
-        }
-        else if (d < closeDistance)
-        {
-            yellowWarning.gameObject.SetActive(true);
-            redWarning.gameObject.SetActive(false);
-        }
-        else
-        {
-            yellowWarning.gameObject.SetActive(false);
-            redWarning.gameObject.SetActive(false);
+            yellowWarning.gameObject.SetActive(needed == WarningState.Yellow);
+            redWarning.gameObject.SetActive(needed == WarningState.Red);
+            currentWarningState = needed;
+            redWasActive = (needed == WarningState.Red);
         }
 
-        if (redWarning.gameObject.activeSelf)
+        // Обновляем альфу красного предупреждения только если оно активно
+        if (redWasActive)
         {
             bool isInCamera = IsInCameraView();
-            Color c = redWarning.color;
-            c.a = isInCamera ? 0.5f : 1f;
-            redWarning.color = c;
+            // ОПТИМИЗАЦИЯ: пишем в Image.color только при смене состояния
+            if (isInCamera != lastInCameraState)
+            {
+                Color c = redWarning.color;
+                c.a = isInCamera ? 0.5f : 1f;
+                redWarning.color = c;
+                lastInCameraState = isInCamera;
+            }
         }
     }
 
     bool IsInCameraView()
     {
-        Vector3 vp = mainCamera.WorldToViewportPoint(transform.position);
-        return vp.x > 0 && vp.x < 1 && vp.y > 0 && vp.y < 1 && vp.z > 0;
+        Vector3 vp = mainCamera.WorldToViewportPoint(selfTransform.position);
+        return vp.x > 0f && vp.x < 1f && vp.y > 0f && vp.y < 1f && vp.z > 0f;
     }
 
-    /* пуля / враг */
     void OnTriggerEnter2D(Collider2D other)
     {
-        if (other.CompareTag("PlayerBullet"))  Destroy(other.gameObject);
+        if (other.CompareTag("PlayerBullet")) Destroy(other.gameObject);
         if (other.CompareTag("EnemyBullet"))  Destroy(other.gameObject);
-        if (other.CompareTag("Enemy"))         other.GetComponent<EnemyPlatform>()?.Die();
+        if (other.CompareTag("Enemy"))        other.GetComponent<EnemyPlatform>()?.Die();
     }
 }
