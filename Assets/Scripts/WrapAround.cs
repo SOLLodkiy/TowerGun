@@ -14,26 +14,35 @@ public class WrapAround : MonoBehaviour
 
     private Rigidbody2D rb;
 
-    // Новые поля для указания стен вручную
     public List<Collider2D> leftWalls;
     public List<Collider2D> rightWalls;
 
-    private float wrapCooldown = 0.2f; // Время блокировки повторного телепорта
-    private float lastWrapTime = -1f;  // Время последнего телепорта
+    private float wrapCooldown = 0.2f;
+    private float lastWrapTime = -1f;
+
+    // Кэшируем LayerMask чтобы не вызывать LayerMask.NameToLayer каждый OnTrigger
+    private int wallLayer;
+    private int blocksLayer;
 
     void Start()
     {
-        mainCamera = Camera.main;
+        mainCamera  = Camera.main;
         float height = 2f * mainCamera.orthographicSize;
-        screenWidth = height * mainCamera.aspect;
-        rb = GetComponent<Rigidbody2D>();
+        screenWidth  = height * mainCamera.aspect;
+        rb           = GetComponent<Rigidbody2D>();
         if (rb == null)
             Debug.LogError("Rigidbody2D не найден на объекте " + gameObject.name);
+
+        // Кэшируем слои один раз в Start
+        wallLayer   = LayerMask.NameToLayer("Wall");
+        blocksLayer = LayerMask.NameToLayer("Blocks");
     }
+
+    // ── Крайние стены ────────────────────────────────────────────────────────
 
     void OnTriggerEnter2D(Collider2D collision)
     {
-        if (collision.gameObject.layer == LayerMask.NameToLayer("Wall"))
+        if (collision.gameObject.layer == wallLayer)
         {
             inWall = true;
 
@@ -43,134 +52,159 @@ public class WrapAround : MonoBehaviour
             }
             else
             {
-                if (collision.transform.position.x < transform.position.x) // Стена слева
-                {
-                    ApplyBounce(Vector2.right); // Отбрасываем вправо
-                }
-                else if (collision.transform.position.x > transform.position.x) // Стена справа
-                {
-                    ApplyBounce(Vector2.left); // Отбрасываем влево
-                }
+                if (collision.transform.position.x < transform.position.x)
+                    ApplyBounce(Vector2.right);
+                else
+                    ApplyBounce(Vector2.left);
             }
         }
     }
 
     void OnTriggerStay2D(Collider2D collision)
     {
-        if (rb == null) return; // защита от NullReference
+        if (rb == null) return;
 
-        if (collision.gameObject.layer == LayerMask.NameToLayer("Wall") && !canWrapAround)
+        if (collision.gameObject.layer == wallLayer && !canWrapAround)
         {
-            Vector2 pushDir;
+            Vector2 pushDir = collision.transform.position.x < transform.position.x
+                ? Vector2.right
+                : Vector2.left;
 
-            if (collision.transform.position.x < transform.position.x)
-                pushDir = Vector2.right;
-            else
-                pushDir = Vector2.left;
-
-            // мягко выталкиваем игрока из стены
             rb.linearVelocity = new Vector2(pushDir.x * wallPushForce, rb.linearVelocity.y);
         }
     }
 
     void OnTriggerExit2D(Collider2D collision)
     {
-        if (collision.gameObject.layer == LayerMask.NameToLayer("Wall"))
-        {
+        if (collision.gameObject.layer == wallLayer)
             inWall = false;
+    }
+
+    // ── Тайлы (Platform / Blocks) ─────────────────────────────────────────────
+    // Используем OnCollisionEnter2D (не Trigger) потому что тайлы — твёрдые коллайдеры.
+    // Направление отскока определяем по нормали контакта — это единственный
+    // надёжный способ для Tilemap, у которого один большой общий коллайдер.
+
+    void OnCollisionEnter2D(Collision2D collision)
+    {
+        if (collision.gameObject.layer != blocksLayer) return;
+
+        // Перебираем точки контакта и ищем горизонтальную нормаль
+        // (нормаль.x значительная → это боковое столкновение)
+        for (int i = 0; i < collision.contactCount; i++)
+        {
+            Vector2 normal = collision.GetContact(i).normal;
+
+            // Если нормаль достаточно горизонтальная — это боковой удар о тайл
+            // Порог 0.5 означает: угол нормали > 45° от вертикали
+            if (Mathf.Abs(normal.x) > 0.5f)
+            {
+                // normal.x > 0 → стена слева от игрока → отскок вправо
+                // normal.x < 0 → стена справа от игрока → отскок влево
+                Vector2 bounceDir = normal.x > 0 ? Vector2.right : Vector2.left;
+                ApplyBounce(bounceDir);
+                break; // достаточно одного контакта
+            }
         }
     }
+
+    // OnCollisionStay2D — мягко выталкиваем из тайла если застряли
+    void OnCollisionStay2D(Collision2D collision)
+    {
+        if (rb == null) return;
+        if (collision.gameObject.layer != blocksLayer) return;
+
+        for (int i = 0; i < collision.contactCount; i++)
+        {
+            Vector2 normal = collision.GetContact(i).normal;
+            if (Mathf.Abs(normal.x) > 0.5f)
+            {
+                Vector2 pushDir = normal.x > 0 ? Vector2.right : Vector2.left;
+                rb.linearVelocity = new Vector2(pushDir.x * wallPushForce, rb.linearVelocity.y);
+                break;
+            }
+        }
+    }
+
+    // ── Update — ограничение/wrap по краям экрана ────────────────────────────
 
     void Update()
     {
         Vector3 position = transform.position;
+        float camX = mainCamera.transform.position.x;
 
         if (!canWrapAround)
         {
-            if (position.x > mainCamera.transform.position.x + screenWidth / 2)
+            if (position.x > camX + screenWidth * 0.5f)
             {
-                position.x = mainCamera.transform.position.x + screenWidth / 2;
+                position.x = camX + screenWidth * 0.5f;
                 ApplyBounce(Vector2.left);
             }
-            else if (position.x < mainCamera.transform.position.x - screenWidth / 2)
+            else if (position.x < camX - screenWidth * 0.5f)
             {
-                position.x = mainCamera.transform.position.x - screenWidth / 2;
+                position.x = camX - screenWidth * 0.5f;
                 ApplyBounce(Vector2.right);
             }
         }
         else
         {
-            if (position.x > mainCamera.transform.position.x + screenWidth / 2)
-            {
-                position.x = mainCamera.transform.position.x - screenWidth / 2;
-            }
-            else if (position.x < mainCamera.transform.position.x - screenWidth / 2)
-            {
-                position.x = mainCamera.transform.position.x + screenWidth / 2;
-            }
+            if (position.x > camX + screenWidth * 0.5f)
+                position.x = camX - screenWidth * 0.5f;
+            else if (position.x < camX - screenWidth * 0.5f)
+                position.x = camX + screenWidth * 0.5f;
         }
 
         transform.position = position;
     }
 
+    // ── Телепорт сквозь стену (wrap) ─────────────────────────────────────────
+
     void TeleportThroughWall(Collider2D wall)
     {
-        // Проверяем таймер, чтобы не телепортировать слишком часто
         if (Time.time - lastWrapTime < wrapCooldown) return;
 
         Vector3 pos = transform.position;
         List<Collider2D> targetList = null;
 
         if (leftWalls.Contains(wall))
-            targetList = rightWalls; // игрок касается левой стены
+            targetList = rightWalls;
         else if (rightWalls.Contains(wall))
-            targetList = leftWalls; // игрок касается правой стены
+            targetList = leftWalls;
 
-        if (targetList != null && targetList.Count > 0)
+        if (targetList == null || targetList.Count == 0) return;
+
+        Collider2D nearest = targetList[0];
+        float minDist = Mathf.Abs(nearest.bounds.center.y - pos.y);
+
+        foreach (var w in targetList)
         {
-            // Находим стену на той стороне, ближайшую по y
-            Collider2D nearest = targetList[0];
-            float minDist = Mathf.Abs(nearest.bounds.center.y - pos.y);
-
-            foreach (var w in targetList)
-            {
-                float dist = Mathf.Abs(w.bounds.center.y - pos.y);
-                if (dist < minDist)
-                {
-                    minDist = dist;
-                    nearest = w;
-                }
-            }
-
-            float safeOffset = 0.2f; // безопасное смещение вне коллайдера
-
-            // телепортируем игрока к противоположной стене с безопасным смещением
-            if (leftWalls.Contains(wall))
-                pos.x = nearest.bounds.min.x - safeOffset; // левый край правой стены
-            else
-                pos.x = nearest.bounds.max.x + safeOffset; // правый край левой стены
-
-            transform.position = pos;
-
-            // сохраняем время последнего телепорта
-            lastWrapTime = Time.time;
+            float dist = Mathf.Abs(w.bounds.center.y - pos.y);
+            if (dist < minDist) { minDist = dist; nearest = w; }
         }
+
+        float safeOffset = 0.2f;
+
+        if (leftWalls.Contains(wall))
+            pos.x = nearest.bounds.min.x - safeOffset;
+        else
+            pos.x = nearest.bounds.max.x + safeOffset;
+
+        transform.position = pos;
+        lastWrapTime = Time.time;
     }
+
+    // ── Отскок ───────────────────────────────────────────────────────────────
 
     void ApplyBounce(Vector2 direction)
     {
-        if (rb != null)
-        {
-            Vector2 velocity = rb.linearVelocity;
+        if (rb == null) return;
 
-            float minHorizontalSpeed = 2f;
+        Vector2 velocity = rb.linearVelocity;
+        float minHorizontalSpeed = 2f;
 
-            velocity.x = direction.x * Mathf.Max(Mathf.Abs(velocity.x), minHorizontalSpeed) * bounceFactor;
+        velocity.x = direction.x * Mathf.Max(Mathf.Abs(velocity.x), minHorizontalSpeed) * bounceFactor;
+        velocity.y = Mathf.Max(velocity.y, 1f);
 
-            // немного сохраняем вертикаль (чтобы не "гасился" прыжок)
-            velocity.y = Mathf.Max(velocity.y, 1f);
-
-            rb.linearVelocity = velocity;
-        }
+        rb.linearVelocity = velocity;
     }
 }

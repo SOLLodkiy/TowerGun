@@ -13,39 +13,37 @@ public class EquippedItemsUI : MonoBehaviour
 
     private bool isSessionStarted = false;
     private bool iconsMoved = false;
-    private bool iconsBuilt = false; // флаг — иконки уже построены, не нужно пересоздавать
 
     private PistolMove player;
 
     private void Start()
     {
-        // ОПТИМИЗАЦИЯ: ищем один раз в Start, не в Update
         player = FindFirstObjectByType<PistolMove>();
 
         preSessionContainer.gameObject.SetActive(true);
         inSessionContainer.gameObject.SetActive(false);
 
-        // Строим иконки один раз
         RefreshIcons();
-        iconsBuilt = true;
 
         if (player != null)
             player.OnSessionStarted += HandleSessionStart;
+
+        // Подписываемся — теперь при надевании/снятии иконки обновятся сразу
+        if (EquipmentManager.Instance != null)
+            EquipmentManager.Instance.OnEquipmentChanged += OnEquipmentChanged;
     }
 
     private void OnDestroy()
     {
-        // Отписываемся чтобы не накапливать подписчиков между сессиями
         if (player != null)
             player.OnSessionStarted -= HandleSessionStart;
+
+        if (EquipmentManager.Instance != null)
+            EquipmentManager.Instance.OnEquipmentChanged -= OnEquipmentChanged;
     }
 
     void Update()
     {
-        // ОПТИМИЗАЦИЯ: убран FindFirstObjectByType из Update (вызывался каждый кадр)
-        // и убран RefreshIcons из Update (каждый кадр Destroy+Instantiate иконок)
-        // Теперь переход контейнеров обрабатывается только через событие OnSessionStarted
-
         if (player != null && player.sessionStarted && !iconsMoved)
         {
             MoveIconsTo(inSessionContainer);
@@ -60,18 +58,35 @@ public class EquippedItemsUI : MonoBehaviour
 
         preSessionContainer.gameObject.SetActive(false);
         inSessionContainer.gameObject.SetActive(true);
-
         MoveIconsTo(inSessionContainer);
+    }
+
+    // Вызывается когда экипировка изменилась
+    private void OnEquipmentChanged()
+    {
+        RefreshIcons();
     }
 
     private void RefreshIcons()
     {
-        foreach (Transform child in preSessionContainer)
+        // Определяем в каком контейнере сейчас находятся иконки
+        RectTransform activeContainer = iconsMoved ? inSessionContainer : preSessionContainer;
+
+        // Очищаем активный контейнер
+        foreach (Transform child in activeContainer)
             Destroy(child.gameObject);
 
+        // Если иконки были перенесены — чистим и preSession на всякий случай
+        if (iconsMoved)
+        {
+            foreach (Transform child in preSessionContainer)
+                Destroy(child.gameObject);
+        }
+
+        // Создаём иконки для всех надетых предметов
         foreach (var item in EquipmentManager.Instance.GetEquippedItems())
         {
-            GameObject icon = Instantiate(iconPrefab, preSessionContainer);
+            GameObject icon = Instantiate(iconPrefab, activeContainer);
             icon.transform.localScale = Vector3.one * 0.5f;
 
             Image img = icon.GetComponent<Image>();
