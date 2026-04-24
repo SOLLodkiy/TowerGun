@@ -6,8 +6,8 @@ using UnityEngine.UI;
 public class ImminentDanger : MonoBehaviour
 {
     [Header("Distance-based speed")]
-    public float farDistance    = 10f;
-    public float closeDistance  = 5f;
+    public float farDistance     = 10f;
+    public float closeDistance   = 5f;
     public float soCloseDistance = 2f;
 
     [Header("Base speed values (by distance)")]
@@ -21,27 +21,38 @@ public class ImminentDanger : MonoBehaviour
     public float extraGrowPerSec = 0.05f;
     public float extraMax        = 4f;
 
+    [Header("Slow Saw")]
+    [Tooltip("Если включено — пила движется медленнее чем обычно")]
+    public bool slowSawEnabled = false;
+    [Tooltip("Коэффициент замедления пилы (0.5 = вдвое медленнее)")]
+    [Range(0.1f, 0.9f)]
+    public float slowSawMultiplier = 0.6f;
+
     [Header("Links / UI")]
     public Transform player;
-    public Image yellowWarning;
-    public Image redWarning;
     public Camera mainCamera;
+
+    [Header("Danger Indicator")]
+    public Image dangerFill;
+    public RectTransform playerIcon;
+    public RectTransform sawIcon;
+    public Color colorSafe   = new Color(0.39f, 0.90f, 0.13f);
+    public Color colorMid    = new Color(0.94f, 0.82f, 0.15f);
+    public Color colorDanger = new Color(0.89f, 0.29f, 0.29f);
+
+    public float indicatorStartDistance = 40f;
+    public float indicatorFullDistance  = 2f;
+
+    public float iconBaseSize   = 36f;
+    public float iconMaxSize    = 52f;
+    public float pulseThreshold = 0.65f;
+    public float pulseSpeed     = 3f;
 
     private float extraSpeed;
     public float speedSaw;
 
-    // ОПТИМИЗАЦИЯ: кэшируем transform пилы
     private Transform selfTransform;
-
-    // ОПТИМИЗАЦИЯ: UI предупреждений меняется редко — отслеживаем состояние
-    // чтобы не вызывать SetActive каждый кадр (SetActive дорогой вызов)
-    private enum WarningState { None, Yellow, Red }
-    private WarningState currentWarningState = WarningState.None;
-
-    // ОПТИМИЗАЦИЯ: цвет redWarning меняется только при смене isInCamera —
-    // кэшируем последнее состояние чтобы не писать в Image.color каждый кадр
-    private bool lastInCameraState = false;
-    private bool redWasActive = false;
+    private float smoothedFill = 0f;
 
     void Start()
     {
@@ -53,58 +64,66 @@ public class ImminentDanger : MonoBehaviour
     {
         extraSpeed = Mathf.Min(extraSpeed + extraGrowPerSec * Time.deltaTime, extraMax);
 
-        // ОПТИМИЗАЦИЯ: sqrMagnitude дешевле чем Vector3.Distance (нет sqrt)
-        // Используем только по Y так как пила движется вертикально
         float distance = Mathf.Abs(selfTransform.position.y - player.position.y);
 
         float baseSpeed;
-        if      (distance >= farDistance)   baseSpeed = speedFar;
-        else if (distance >= closeDistance) baseSpeed = speedMid;
+        if      (distance >= farDistance)     baseSpeed = speedFar;
+        else if (distance >= closeDistance)   baseSpeed = speedMid;
         else if (distance >= soCloseDistance) baseSpeed = speedNear;
-        else                                baseSpeed = speedSoClose;
+        else                                  baseSpeed = speedSoClose;
 
         float currentSpeed = baseSpeed + extraSpeed;
+
+        // Замедление пилы если включено
+        if (slowSawEnabled)
+            currentSpeed *= slowSawMultiplier;
+
         selfTransform.Translate(Vector3.up * currentSpeed * Time.deltaTime);
-
-        HandleUI(distance);
         speedSaw = currentSpeed;
-    }
 
-    void HandleUI(float d)
-    {
-        WarningState needed;
-        if      (d < soCloseDistance) needed = WarningState.Red;
-        else if (d < closeDistance)   needed = WarningState.Yellow;
-        else                          needed = WarningState.None;
-
-        // ОПТИМИЗАЦИЯ: SetActive только при реальном изменении состояния
-        if (needed != currentWarningState)
-        {
-            yellowWarning.gameObject.SetActive(needed == WarningState.Yellow);
-            redWarning.gameObject.SetActive(needed == WarningState.Red);
-            currentWarningState = needed;
-            redWasActive = (needed == WarningState.Red);
-        }
-
-        // Обновляем альфу красного предупреждения только если оно активно
-        if (redWasActive)
-        {
-            bool isInCamera = IsInCameraView();
-            // ОПТИМИЗАЦИЯ: пишем в Image.color только при смене состояния
-            if (isInCamera != lastInCameraState)
-            {
-                Color c = redWarning.color;
-                c.a = isInCamera ? 0.5f : 1f;
-                redWarning.color = c;
-                lastInCameraState = isInCamera;
-            }
-        }
+        UpdateDangerIndicator(distance);
     }
 
     bool IsInCameraView()
     {
         Vector3 vp = mainCamera.WorldToViewportPoint(selfTransform.position);
         return vp.x > 0f && vp.x < 1f && vp.y > 0f && vp.y < 1f && vp.z > 0f;
+    }
+
+    private void UpdateDangerIndicator(float distance)
+    {
+        float linear     = Mathf.InverseLerp(indicatorStartDistance, indicatorFullDistance, distance);
+        float targetFill = Mathf.Pow(linear, 2.5f);
+
+        smoothedFill = Mathf.Lerp(smoothedFill, targetFill, Time.deltaTime * 4f);
+        dangerFill.fillAmount = smoothedFill;
+
+        Color targetColor;
+        if      (smoothedFill < 0.4f) targetColor = colorSafe;
+        else if (smoothedFill < 0.7f) targetColor = colorMid;
+        else                          targetColor = colorDanger;
+        dangerFill.color = Color.Lerp(dangerFill.color, targetColor, Time.deltaTime * 6f);
+
+        UpdateIconScale();
+    }
+
+    private void UpdateIconScale()
+    {
+        float baseScale = Mathf.Lerp(iconBaseSize, iconMaxSize, smoothedFill);
+
+        float pulse = 0f;
+        if (smoothedFill >= pulseThreshold)
+        {
+            float pulseIntensity    = Mathf.InverseLerp(pulseThreshold, 1f, smoothedFill);
+            float currentPulseSpeed = pulseSpeed + pulseIntensity * 4f;
+            pulse = Mathf.Sin(Time.time * currentPulseSpeed) * pulseIntensity * 6f;
+        }
+
+        float   finalSize = baseScale + pulse;
+        Vector2 size      = new Vector2(finalSize, finalSize);
+
+        if (playerIcon != null) playerIcon.sizeDelta = size;
+        if (sawIcon    != null) sawIcon.sizeDelta    = size;
     }
 
     void OnTriggerEnter2D(Collider2D other)

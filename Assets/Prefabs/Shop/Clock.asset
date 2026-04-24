@@ -22,8 +22,8 @@ MonoBehaviour:
   itemSprite: {fileID: 1758549993, guid: 35e1141a78cb62b44966bb929580c222, type: 3}
   lockedSprite: {fileID: -1161233042, guid: 184ecb9f7dbc03f44bcc03e50688728c, type: 3}
   unlockedSprite: {fileID: -2039268163, guid: 184ecb9f7dbc03f44bcc03e50688728c, type: 3}
-  purchasedSprite: {fileID: 505992865, guid: 184ecb9f7dbc03f44bcc03e50688728c, type: 3}
-  equippedSprite: {fileID: 903159187, guid: 184ecb9f7dbc03f44bcc03e50688728c, type: 3}
+  purchasedSprite: {fileID: 903159187, guid: 184ecb9f7dbc03f44bcc03e50688728c, type: 3}
+  equippedSprite: {fileID: 505992865, guid: 184ecb9f7dbc03f44bcc03e50688728c, type: 3}
   unlockType: 6
   unlockRequirement: 500
   boolTargetName: slowMoModifierEnabled

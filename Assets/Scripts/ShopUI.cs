@@ -8,11 +8,11 @@ public class ShopUI : MonoBehaviour
     public static ShopUI Instance;
 
     [Header("Info Panel")]
-    public GameObject infoPanel;               // сам объект плашки
-    public RectTransform infoPanelRect;        // RectTransform плашки
-    public RectTransform infoShownAnchor;      // якорь видимой позиции
-    public RectTransform infoHiddenAnchor;     // якорь скрытой позиции
-    public float infoSlideDuration = 0.30f;    // сек, unscaled
+    public GameObject infoPanel;
+    public RectTransform infoPanelRect;
+    public RectTransform infoShownAnchor;
+    public RectTransform infoHiddenAnchor;
+    public float infoSlideDuration = 0.30f;
     public AnimationCurve infoEase = AnimationCurve.EaseInOut(0, 0, 1, 1);
 
     [Header("Info UI")]
@@ -24,11 +24,11 @@ public class ShopUI : MonoBehaviour
     public Button actionButton;
 
     [Header("Close Button Motion")]
-    public float closeBtnMoveDuration = 0.25f; // сек, unscaled
+    public float closeBtnMoveDuration = 0.25f;
     public AnimationCurve closeBtnEase = AnimationCurve.EaseInOut(0, 0, 1, 1);
 
     [SerializeField] private GameObject shopPanel;
-    [SerializeField] private Button shopButton; // ссылка на ту самую кнопку
+    [SerializeField] private Button shopButton;
 
     private ShopItemUI currentItem;
     private ShopUIManager shopManager;
@@ -39,22 +39,29 @@ public class ShopUI : MonoBehaviour
 
     private PistolMove player;
 
+    private RectTransform actionButtonRT;
+    private Text actionButtonText;
+
     void Start()
     {
-        StopAllCoroutines(); // Остановить все корутины на этом объекте
+        StopAllCoroutines();
     }
 
     private void Awake()
     {
         Instance = this;
         shopManager = FindFirstObjectByType<ShopUIManager>();
+        player      = FindFirstObjectByType<PistolMove>();
 
-        player = FindFirstObjectByType<PistolMove>();
+        if (actionButton != null)
+        {
+            actionButtonRT   = actionButton.GetComponent<RectTransform>();
+            actionButtonText = actionButton.GetComponentInChildren<Text>();
+        }
 
-        // Старт — плашка скрыта
         if (infoPanel != null)
         {
-            infoPanel.SetActive(true); // активна, чтобы мы могли двигать RectTransform
+            infoPanel.SetActive(true);
             if (infoPanelRect != null && infoHiddenAnchor != null)
                 infoPanelRect.position = infoHiddenAnchor.position;
             infoPanel.SetActive(false);
@@ -63,19 +70,14 @@ public class ShopUI : MonoBehaviour
         RestoreEquippedEffectsOnStart();
     }
 
-    /* ===================== ОТКРЫТИЕ/ЗАКРЫТИЕ ПАНЕЛИ ===================== */
-
     public void OpenInfoPanel()
     {
         if (infoOpen) return;
         infoOpen = true;
 
         infoPanel.SetActive(true);
-        // Двигаем плашку снизу вверх
         if (panelMoveCo != null) StopCoroutine(panelMoveCo);
         panelMoveCo = StartCoroutine(MoveUI(infoPanelRect, infoHiddenAnchor, infoShownAnchor, infoSlideDuration, infoEase));
-
-        // Переназначаем кнопку закрытия и двигаем её к плашке
         SwitchCloseButton(CloseInfoPanel, shopManager.shopCloseAnchor, shopManager.infoCloseAnchor);
     }
 
@@ -84,11 +86,8 @@ public class ShopUI : MonoBehaviour
         if (!infoOpen) return;
         infoOpen = false;
 
-        // Увозим плашку вниз
         if (panelMoveCo != null) StopCoroutine(panelMoveCo);
         panelMoveCo = StartCoroutine(CloseInfoRoutine());
-
-        // Возвращаем кнопку на место и поведение "закрыть магазин"
         SwitchCloseButton(shopManager.CloseShop, shopManager.infoCloseAnchor, shopManager.shopCloseAnchor);
     }
 
@@ -98,16 +97,15 @@ public class ShopUI : MonoBehaviour
         infoPanel.SetActive(false);
     }
 
-    // Универсальная корутина движения UI (в мировых координатах), не зависит от Time.timeScale
-    private IEnumerator MoveUI(RectTransform target, RectTransform from, RectTransform to, float duration, AnimationCurve curve)
+    private IEnumerator MoveUI(RectTransform target, RectTransform from, RectTransform to,
+                                float duration, AnimationCurve curve)
     {
-        if (target == null || from == null || to == null)
-            yield break;
+        if (target == null || from == null || to == null) yield break;
 
-        Vector3 start = (from == null) ? target.position : from.position;
-        Vector3 end = to.position;
-
+        Vector3 start = from.position;
+        Vector3 end   = to.position;
         float t = 0f;
+
         while (t < duration)
         {
             t += Time.unscaledDeltaTime;
@@ -121,79 +119,82 @@ public class ShopUI : MonoBehaviour
 
     private void SwitchCloseButton(System.Action newAction, RectTransform from, RectTransform to)
     {
-        if (shopManager != null && shopManager.closeButton != null)
-        {
-            var btn = shopManager.closeButton;
+        if (shopManager == null || shopManager.closeButton == null) return;
 
-            btn.onClick.RemoveAllListeners();
-            btn.onClick.AddListener(() => newAction());
+        var btn = shopManager.closeButton;
+        btn.onClick.RemoveAllListeners();
+        btn.onClick.AddListener(() => newAction());
 
-            if (closeBtnMoveCo != null) StopCoroutine(closeBtnMoveCo);
-            closeBtnMoveCo = StartCoroutine(MoveUI(
-                btn.GetComponent<RectTransform>(),
-                from,
-                to,
-                closeBtnMoveDuration,
-                closeBtnEase
-            ));
-        }
+        if (closeBtnMoveCo != null) StopCoroutine(closeBtnMoveCo);
+        closeBtnMoveCo = StartCoroutine(MoveUI(
+            btn.GetComponent<RectTransform>(), from, to, closeBtnMoveDuration, closeBtnEase));
     }
-
-
-    /* ===================== ЭКРАНЫ ИНФОРМАЦИИ ===================== */
 
     public void ShowLockedInfo(ShopItemData data)
     {
         OpenInfoPanel();
 
         titleText.text = "Заблокировано!";
-        quoteText.text = "";
-        costText.text = "";
-        itemPreview.sprite = data.lockedSprite;
         actionButton.gameObject.SetActive(false);
+        costText.text = "";
 
-        // Подбираем текст в зависимости от типа задания
+        // Показываем реальный спрайт предмета, но полностью чёрным
+        SetItemPreview(data.itemSprite);
+        itemPreview.color = Color.black;
+
         switch (data.unlockType)
         {
-            case UnlockType.KillEnemies:
-                descriptionText.text = $"Убей {data.unlockRequirement} врагов";
-                break;
+            case UnlockType.KillEnemies:         descriptionText.text = $"Убей {data.unlockRequirement} врагов"; break;
+            case UnlockType.ReachDistance:       descriptionText.text = $"Доберись до {data.unlockRequirement} метров"; break;
+            case UnlockType.TotalCoinsCollected: descriptionText.text = $"Собери {data.unlockRequirement} монет всего"; break;
+            case UnlockType.TotalCoinsSpent:     descriptionText.text = $"Потрать {data.unlockRequirement} монет всего"; break;
+            case UnlockType.Losses:              descriptionText.text = $"Проиграй {data.unlockRequirement} раз"; break;
+            case UnlockType.TimePlayedActive:    descriptionText.text = $"Проведи в игре {data.unlockRequirement} секунд"; break;
+            case UnlockType.ShotsFired:          descriptionText.text = $"Сделай {data.unlockRequirement} выстрелов"; break;
+            case UnlockType.TotalDistance:       descriptionText.text = $"Пройди всего {data.unlockRequirement} метров"; break;
+            case UnlockType.ItemsPurchased:      descriptionText.text = $"Купи {data.unlockRequirement} предметов"; break;
+            default:                             descriptionText.text = "Задание неизвестно"; break;
+        }
 
-            case UnlockType.ReachDistance:
-                descriptionText.text = $"Доберись до {data.unlockRequirement} метров";
-                break;
+        // Прогресс выполнения задания в поле quote
+        int current = GetProgressValue(data);
+        string unit = GetProgressUnit(data.unlockType);
+        quoteText.text = $"{current}/{data.unlockRequirement} {unit}";
+    }
 
-            case UnlockType.TotalCoinsCollected:
-                descriptionText.text = $"Собери {data.unlockRequirement} монет всего";
-                break;
+    // Возвращает текущий прогресс для данного предмета
+    private int GetProgressValue(ShopItemData data)
+    {
+        switch (data.unlockType)
+        {
+            case UnlockType.KillEnemies:         return PlayerPrefs.GetInt("TotalKills", 0);
+            case UnlockType.ReachDistance:       return PlayerPrefs.GetInt("BestDistance", 0);
+            case UnlockType.TotalCoinsCollected: return PlayerPrefs.GetInt("TotalCoinsCollected", 0);
+            case UnlockType.TotalCoinsSpent:     return PlayerPrefs.GetInt("TotalCoinsSpent", 0);
+            case UnlockType.Losses:              return PlayerPrefs.GetInt("TotalLosses", 0);
+            case UnlockType.TimePlayedActive:    return Mathf.FloorToInt(PlayerPrefs.GetFloat("TotalActiveTime", 0f));
+            case UnlockType.ShotsFired:          return PlayerPrefs.GetInt("TotalShots", 0);
+            case UnlockType.TotalDistance:       return Mathf.FloorToInt(PlayerPrefs.GetFloat("TotalDistance", 0f));
+            case UnlockType.ItemsPurchased:      return PlayerPrefs.GetInt("TotalPurchases", 0);
+            default:                             return 0;
+        }
+    }
 
-            case UnlockType.TotalCoinsSpent:
-                descriptionText.text = $"Потрать {data.unlockRequirement} монет всего";
-                break;
-
-            case UnlockType.Losses:
-                descriptionText.text = $"Проиграй {data.unlockRequirement} раз";
-                break;
-
-            case UnlockType.TimePlayedActive:
-                descriptionText.text = $"Проведи в игре {data.unlockRequirement} секунд";
-                break;
-
-            case UnlockType.ShotsFired:
-                descriptionText.text = $"Сделай {data.unlockRequirement} выстрелов";
-                break;
-
-            case UnlockType.TotalDistance:
-                descriptionText.text = $"Пройди всего {data.unlockRequirement} метров";
-                break;
-
-            case UnlockType.ItemsPurchased:
-                descriptionText.text = $"Купи {data.unlockRequirement} предметов";
-                break;
-
-            default:
-                descriptionText.text = "Задание неизвестно";
-                break;
+    // Возвращает читаемое название единицы прогресса
+    private string GetProgressUnit(UnlockType type)
+    {
+        switch (type)
+        {
+            case UnlockType.KillEnemies:         return "врагов убито";
+            case UnlockType.ReachDistance:       return "метров достигнуто";
+            case UnlockType.TotalCoinsCollected: return "монет собрано";
+            case UnlockType.TotalCoinsSpent:     return "монет потрачено";
+            case UnlockType.Losses:              return "поражений";
+            case UnlockType.TimePlayedActive:    return "секунд в игре";
+            case UnlockType.ShotsFired:          return "выстрелов совершено";
+            case UnlockType.TotalDistance:       return "метров пройдено";
+            case UnlockType.ItemsPurchased:      return "предметов куплено";
+            default:                             return "";
         }
     }
 
@@ -202,55 +203,46 @@ public class ShopUI : MonoBehaviour
         OpenInfoPanel();
         currentItem = item;
 
-        titleText.text = data.itemName;
+        titleText.text       = data.itemName;
         descriptionText.text = data.description;
-        quoteText.text = data.quote;
-        costText.text = $"{data.cost}";
-        itemPreview.sprite = data.itemSprite;
-        itemPreview.preserveAspect = true;
-        // Авто-пропорции через RectTransform
-        RectTransform rt = itemPreview.GetComponent<RectTransform>();
-        float spriteRatio = (float)itemPreview.sprite.rect.width / itemPreview.sprite.rect.height;
-        float currentWidth = rt.rect.width;
-        float currentHeight = rt.rect.height;
-        
-        if (currentWidth / currentHeight > spriteRatio)
-        {
-            // ширина слишком большая
-            rt.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, currentHeight * spriteRatio);
-        }
-        else
-        {
-            // высота слишком большая
-            rt.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, currentWidth / spriteRatio);
-        }
+        quoteText.text       = data.quote;
+        costText.text        = $"{data.cost}";
+
+        SetItemPreview(data.itemSprite);
+        itemPreview.color = Color.white;
 
         actionButton.gameObject.SetActive(true);
-        actionButton.GetComponentInChildren<Text>().text = "Купить";
+        actionButtonText.text = "Купить";
         actionButton.onClick.RemoveAllListeners();
-        actionButton.onClick.AddListener(() =>
+        actionButton.onClick.AddListener(() => OnBuyClicked(data, item));
+    }
+
+    private void OnBuyClicked(ShopItemData data, ShopItemUI item)
+    {
+        if (player == null) player = FindFirstObjectByType<PistolMove>();
+        GunMove gunMove = player?.GetComponent<GunMove>() ?? FindFirstObjectByType<GunMove>();
+
+        if (gunMove == null || gunMove.coinCount < data.cost)
         {
-            GunMove player = FindFirstObjectByType<GunMove>();
-            if (player != null && player.coinCount >= data.cost)
-            {
-                player.coinCount -= data.cost;
-                PlayerPrefs.SetInt("Coins", player.coinCount);
-                PlayerPrefs.SetInt("TotalCoinsSpent", PlayerPrefs.GetInt("TotalCoinsSpent", 0) + data.cost);
-                player.UpdateCoinUI();
-                item.Purchase();
-                ShowEquipInfo(data, item, false);
-                // Обновляем прогресс всех ShopItemUI
-                foreach (var item in FindObjectsByType<ShopItemUI>(FindObjectsSortMode.None))
-                {
-                    item.UpdateProgressFromPrefs();
-                    item.TryAutoUnlock();
-                }
-            }
-            else
-            {
-                Debug.Log("Недостаточно монет!");
-            }
-        });
+            Debug.Log("Недостаточно монет!");
+            return;
+        }
+
+        gunMove.coinCount -= data.cost;
+        PlayerPrefs.SetInt("Coins", gunMove.coinCount);
+        PlayerPrefs.SetInt("TotalCoinsSpent", PlayerPrefs.GetInt("TotalCoinsSpent", 0) + data.cost);
+        PlayerPrefs.SetInt("TotalPurchases", PlayerPrefs.GetInt("TotalPurchases", 0) + 1);
+        gunMove.UpdateCoinUI();
+
+        item.Purchase();
+        ShowEquipInfo(data, item, false);
+
+        var shopItems = FindObjectsByType<ShopItemUI>(FindObjectsSortMode.None);
+        foreach (var si in shopItems)
+        {
+            si.UpdateProgressFromPrefs();
+            si.TryAutoUnlock();
+        }
     }
 
     public void ShowEquipInfo(ShopItemData data, ShopItemUI item, bool equipped)
@@ -258,58 +250,66 @@ public class ShopUI : MonoBehaviour
         OpenInfoPanel();
         currentItem = item;
 
-        titleText.text = data.itemName;
+        titleText.text       = data.itemName;
         descriptionText.text = data.description;
-        quoteText.text = data.quote;
-        costText.text = "Куплено";
-        itemPreview.sprite = data.itemSprite;
+        quoteText.text       = data.quote;
+        costText.text        = "Куплено";
+
+        SetItemPreview(data.itemSprite);
+        itemPreview.color = Color.white;
 
         actionButton.gameObject.SetActive(true);
         actionButton.onClick.RemoveAllListeners();
 
         if (!equipped)
         {
-            actionButton.GetComponentInChildren<Text>().text = "Надеть";
+            actionButtonText.text = "Надеть";
             actionButton.onClick.AddListener(() =>
             {
                 item.Equip();
                 ApplyEffect(data, true);
-                ShowEquipInfo(data, item, true);
                 EquipmentManager.Instance.EquipItem(item.Data);
+                ShowEquipInfo(data, item, true);
             });
         }
         else
         {
-            actionButton.GetComponentInChildren<Text>().text = "Снять";
+            actionButtonText.text = "Снять";
             actionButton.onClick.AddListener(() =>
             {
                 item.Unequip();
                 ApplyEffect(data, false);
-                ShowEquipInfo(data, item, false);
                 EquipmentManager.Instance.UnequipItem(item.Data);
+                ShowEquipInfo(data, item, false);
             });
         }
     }
 
-    /* ===================== ПРИМЕНЕНИЕ ЭФФЕКТОВ ===================== */
+    private void SetItemPreview(Sprite sprite)
+    {
+        itemPreview.sprite = sprite;
+        itemPreview.preserveAspect = true;
+    }
 
     private void ApplyEffect(ShopItemData data, bool enable)
     {
         var type = System.Type.GetType(data.scriptName);
-        if (type == null) { Debug.LogWarning("S"); return; }
+        if (type == null) { Debug.LogWarning("Скрипт не найден: " + data.scriptName); return; }
 
         var target = FindFirstObjectByType(type);
-        if (target == null) { Debug.LogWarning("O"); return; }
+        if (target == null) { Debug.LogWarning("Объект не найден для: " + data.scriptName); return; }
 
-        var field = type.GetField(data.boolTargetName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        var field = type.GetField(data.boolTargetName,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
         if (field != null && field.FieldType == typeof(bool))
         {
             field.SetValue(target, enable);
-            player.ApplyBabyMode();
+            if (player != null) player.ApplyBabyMode();
         }
         else
         {
-            Debug.LogWarning("B");
+            Debug.LogWarning("Поле не найдено: " + data.boolTargetName);
         }
 
         PlayerPrefs.SetInt($"Effect_{data.name}", enable ? 1 : 0);
@@ -317,13 +317,12 @@ public class ShopUI : MonoBehaviour
 
     private void RestoreEquippedEffectsOnStart()
     {
-        foreach (var item in FindObjectsByType<ShopItemUI>(FindObjectsSortMode.None))
+        var shopItems = FindObjectsByType<ShopItemUI>(FindObjectsSortMode.None);
+        foreach (var item in shopItems)
         {
             var data = item.Data;
             if (PlayerPrefs.GetInt($"Effect_{data.name}", 0) == 1)
-            {
                 ApplyEffect(data, true);
-            }
         }
     }
 }

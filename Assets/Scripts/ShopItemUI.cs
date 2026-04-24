@@ -9,7 +9,7 @@ public class ShopItemUI : MonoBehaviour
     [SerializeField] private Slider progressBar;
 
     [Header("Data")]
-    [SerializeField] private ShopItemData itemData; // ← это поле ты будешь заполнять в инспекторе
+    [SerializeField] private ShopItemData itemData;
 
     private enum ItemState { Locked, Unlocked, Purchased, Equipped }
     private ItemState state;
@@ -20,8 +20,8 @@ public class ShopItemUI : MonoBehaviour
     {
         LoadState();
         RefreshUI();
-        UpdateProgressFromPrefs();   // чтобы прогрессбар сразу отобразился
-        TryAutoUnlock();             // если условие уже выполнено — разблокировать
+        UpdateProgressFromPrefs();
+        TryAutoUnlock();
     }
 
     public void OnClick()
@@ -47,18 +47,21 @@ public class ShopItemUI : MonoBehaviour
     {
         state = ItemState.Purchased;
         SaveState(); RefreshUI();
+        GetComponentInParent<ShopGridSorter>()?.SortItems();
     }
 
     public void Equip()
     {
         state = ItemState.Equipped;
         SaveState(); RefreshUI();
+        GetComponentInParent<ShopGridSorter>()?.SortItems();
     }
 
     public void Unequip()
     {
         state = ItemState.Purchased;
         SaveState(); RefreshUI();
+        GetComponentInParent<ShopGridSorter>()?.SortItems();
     }
 
     public void TryAutoUnlock()
@@ -70,14 +73,14 @@ public class ShopItemUI : MonoBehaviour
         {
             state = ItemState.Unlocked;
             SaveState(); RefreshUI();
+            GetComponentInParent<ShopGridSorter>()?.SortItems();
         }
     }
 
     public void UpdateProgressFromPrefs()
     {
         int progress = GetProgressValue();
-    
-        // Список типов, для которых есть прогрессбар
+
         bool hasProgressBar = itemData.unlockType == UnlockType.KillEnemies
                         || itemData.unlockType == UnlockType.ReachDistance
                         || itemData.unlockType == UnlockType.TotalCoinsCollected
@@ -90,7 +93,6 @@ public class ShopItemUI : MonoBehaviour
 
         if (hasProgressBar)
         {
-            // Если прогресс >= требуемого, скрываем прогрессбар
             if (progress >= itemData.unlockRequirement)
             {
                 progressBar.gameObject.SetActive(false);
@@ -111,78 +113,57 @@ public class ShopItemUI : MonoBehaviour
     {
         switch (itemData.unlockType)
         {
-            case UnlockType.KillEnemies:
-                return PlayerPrefs.GetInt("TotalKills", 0);
-
-            case UnlockType.ReachDistance:
-                return PlayerPrefs.GetInt("BestDistance", 0);
-
-            case UnlockType.TotalCoinsCollected:
-                return PlayerPrefs.GetInt("TotalCoinsCollected", 0);
-
-            case UnlockType.TotalCoinsSpent:
-                return PlayerPrefs.GetInt("TotalCoinsSpent", 0);
-
-            case UnlockType.Losses:
-                return PlayerPrefs.GetInt("TotalLosses", 0);
-
-            case UnlockType.TimePlayedActive:
-                // секундами (требование тоже в секундах)
-                return Mathf.FloorToInt(PlayerPrefs.GetFloat("TotalActiveTime", 0f));
-
-            case UnlockType.ShotsFired:
-                return PlayerPrefs.GetInt("TotalShots", 0);
-
-            case UnlockType.TotalDistance:
-                return Mathf.FloorToInt(PlayerPrefs.GetFloat("TotalDistance", 0f));
-
-            case UnlockType.ItemsPurchased:
-                return PlayerPrefs.GetInt("TotalPurchases", 0);
-
-            default:
-                return 0;
+            case UnlockType.KillEnemies:         return PlayerPrefs.GetInt("TotalKills", 0);
+            case UnlockType.ReachDistance:       return PlayerPrefs.GetInt("BestDistance", 0);
+            case UnlockType.TotalCoinsCollected: return PlayerPrefs.GetInt("TotalCoinsCollected", 0);
+            case UnlockType.TotalCoinsSpent:     return PlayerPrefs.GetInt("TotalCoinsSpent", 0);
+            case UnlockType.Losses:              return PlayerPrefs.GetInt("TotalLosses", 0);
+            case UnlockType.TimePlayedActive:    return Mathf.FloorToInt(PlayerPrefs.GetFloat("TotalActiveTime", 0f));
+            case UnlockType.ShotsFired:          return PlayerPrefs.GetInt("TotalShots", 0);
+            case UnlockType.TotalDistance:       return Mathf.FloorToInt(PlayerPrefs.GetFloat("TotalDistance", 0f));
+            case UnlockType.ItemsPurchased:      return PlayerPrefs.GetInt("TotalPurchases", 0);
+            default:                             return 0;
         }
     }
 
     private void RefreshUI()
     {
-        // Иконка видна только, когда НЕ Locked
-        iconImage.enabled = (state != ItemState.Locked);
-        if (iconImage.enabled) 
+        // Иконка видна всегда — для заблокированных рисуем её чёрной
+        iconImage.enabled = true;
+        iconImage.sprite = itemData.itemSprite;
+        iconImage.preserveAspect = true;
+
+        // Заблокировано — чёрный силуэт, иначе нормальный цвет
+        iconImage.color = (state == ItemState.Locked) ? Color.black : Color.white;
+
+        // Пропорции применяем только для разблокированных предметов
+        if (state != ItemState.Locked)
         {
-            iconImage.sprite = itemData.itemSprite;
-            iconImage.preserveAspect = true;
-            // Авто-пропорции через RectTransform
             RectTransform rt = iconImage.GetComponent<RectTransform>();
-            float spriteRatio = (float)iconImage.sprite.rect.width / iconImage.sprite.rect.height;
-            float currentWidth = rt.rect.width;
+            float spriteRatio   = (float)iconImage.sprite.rect.width / iconImage.sprite.rect.height;
+            float currentWidth  = rt.rect.width;
             float currentHeight = rt.rect.height;
-            
+
             if (currentWidth / currentHeight > spriteRatio)
-            {
-                // ширина слишком большая
                 rt.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, currentHeight * spriteRatio);
-            }
             else
-            {
-                // высота слишком большая
                 rt.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, currentWidth / spriteRatio);
-            }
         }
 
         switch (state)
         {
-            case ItemState.Locked:      slotImage.sprite = itemData.lockedSprite;      break;
-            case ItemState.Unlocked:    slotImage.sprite = itemData.unlockedSprite;    break;
-            case ItemState.Purchased:   slotImage.sprite = itemData.purchasedSprite;   break;
-            case ItemState.Equipped:    slotImage.sprite = itemData.equippedSprite;    break;
+            case ItemState.Locked:    slotImage.sprite = itemData.lockedSprite;    break;
+            case ItemState.Unlocked:  slotImage.sprite = itemData.unlockedSprite;  break;
+            case ItemState.Purchased: slotImage.sprite = itemData.purchasedSprite; break;
+            case ItemState.Equipped:  slotImage.sprite = itemData.equippedSprite;  break;
         }
     }
 
     private void SaveState() => PlayerPrefs.SetInt(PrefKey, (int)state);
     private void LoadState() => state = (ItemState)PlayerPrefs.GetInt(PrefKey, 0);
 
-    // Чтобы ShopUI мог узнать текущее состояние при показе
-    public bool IsEquipped => (int)state == 3;
+    public bool IsEquipped  => state == ItemState.Equipped;
+    public bool IsPurchased => state == ItemState.Purchased;
+    public bool IsUnlocked  => state == ItemState.Unlocked;
     public ShopItemData Data => itemData;
 }

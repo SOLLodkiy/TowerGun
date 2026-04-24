@@ -14,13 +14,13 @@ public class ShopUIManager : MonoBehaviour
     public Button cursesButton;
     public Button weaponsButton;
     public Button specialWeaponsButton;
-    public Image backgroundImage; // фон магазина
-    public Text shopTitle; // Заголовок магазина
+    public Image backgroundImage;
+    public Text shopTitle;
 
     [Header("Category Colors")]
     public Color upgradesColor = new Color(0f, 0.8f, 0f);
-    public Color cursesColor = new Color(0.35f, 0f, 0.5f); // фиолетовый
-    public Color weaponsColor = new Color(1f, 0.5f, 0f); // оранжевый
+    public Color cursesColor = new Color(0.35f, 0f, 0.5f);
+    public Color weaponsColor = new Color(1f, 0.5f, 0f);
     public Color specialWeaponsColor = Color.yellow;
 
     [Header("Category Titles")]
@@ -30,37 +30,34 @@ public class ShopUIManager : MonoBehaviour
     public string specialWeaponsTitle = "Особое оружие";
 
     [Header("Close Button Anchors")]
-    public RectTransform shopCloseAnchor;  // CloseBtnAnchor_Shop
-    public RectTransform infoCloseAnchor;  // CloseBtnAnchor_Info
+    public RectTransform shopCloseAnchor;
+    public RectTransform infoCloseAnchor;
 
     [Header("Category Content Panels")]
-    public GameObject upgradesContent;       // Панель с предметами улучшений
-    public GameObject cursesContent;         // Панель с предметами проклятий
-    public GameObject weaponsContent;        // Панель с оружием
-    public GameObject specialWeaponsContent; // Панель с особым оружием
-
+    public GameObject upgradesContent;
+    public GameObject cursesContent;
+    public GameObject weaponsContent;
+    public GameObject specialWeaponsContent;
 
     public Animator upgradesAnimator;
     public Animator cursesAnimator;
     public Animator weaponsAnimator;
     public Animator specialWeaponsAnimator;
 
-    private int currentCategory = 0; // 0 - Улучшения (дефолт)
-    private const string CategoryKey = "ShopCategory"; // ключ для PlayerPrefs
+    private int currentCategory = 0;
+    private const string CategoryKey = "ShopCategory";
 
-    public PistolMove playerGunMove; // Ссылка на скрипт GunMove
+    public PistolMove playerGunMove;
 
     private void Start()
     {
-        StopAllCoroutines(); // Остановить все корутины на этом объекте
+        StopAllCoroutines();
 
         shopPanel.SetActive(false);
         darkBackground.SetActive(false);
 
-        // Загружаем категорию из PlayerPrefs (если есть)
         currentCategory = PlayerPrefs.GetInt(CategoryKey, 0);
 
-        // навешиваем слушатели
         closeButton.onClick.AddListener(CloseShop);
         upgradesButton.onClick.AddListener(() => SetCategory(0));
         cursesButton.onClick.AddListener(() => SetCategory(1));
@@ -70,35 +67,37 @@ public class ShopUIManager : MonoBehaviour
 
     public void OpenShop()
     {
-        playerGunMove.canShoot = false; // Отключаем возможность стрелять
+        playerGunMove.canShoot = false;
         shopPanel.SetActive(true);
         darkBackground.SetActive(true);
 
-        // Устанавливаем сохранённую категорию
         SetCategory(currentCategory);
 
-        Time.timeScale = 0f; // останавливаем игру
+        Time.timeScale = 0f;
+
+        // Сортируем все гриды при открытии магазина
+        foreach (var sorter in FindObjectsByType<ShopGridSorter>(FindObjectsSortMode.None))
+            sorter.SortItems();
     }
 
     public void CloseShop()
     {
         shopPanel.SetActive(false);
         darkBackground.SetActive(false);
-        Time.timeScale = 1f; // возобновляем игру
-        StartCoroutine(EnableShootingAfterDelay(0.1f)); // Запускаем корутину
+        Time.timeScale = 1f;
+        StartCoroutine(EnableShootingAfterDelay(0.1f));
     }
 
     private IEnumerator EnableShootingAfterDelay(float delay)
     {
-        yield return new WaitForSecondsRealtime(delay); // Ждем указанное время
-        playerGunMove.canShoot = true; // Включаем возможность стрелять
+        yield return new WaitForSecondsRealtime(delay);
+        playerGunMove.canShoot = true;
     }
 
     public void SetCategory(int categoryIndex)
     {
         currentCategory = categoryIndex;
 
-        // Сохраняем категорию
         PlayerPrefs.SetInt(CategoryKey, currentCategory);
         PlayerPrefs.Save();
 
@@ -121,19 +120,17 @@ public class ShopUIManager : MonoBehaviour
                 shopTitle.text = specialWeaponsTitle;
                 break;
         }
-        // Включаем только текущую панель, остальные скрываем
+
         upgradesContent.SetActive(categoryIndex == 0);
         cursesContent.SetActive(categoryIndex == 1);
         weaponsContent.SetActive(categoryIndex == 2);
         specialWeaponsContent.SetActive(categoryIndex == 3);
 
-        // Обновляем выбранную кнопку
         UpdateButtonSelection(categoryIndex);
     }
 
     private void UpdateButtonSelection(int categoryIndex)
     {
-        // Сбрасываем все кнопки
         upgradesAnimator.SetBool("IsSelected", categoryIndex == 0);
         cursesAnimator.SetBool("IsSelected", categoryIndex == 1);
         weaponsAnimator.SetBool("IsSelected", categoryIndex == 2);
