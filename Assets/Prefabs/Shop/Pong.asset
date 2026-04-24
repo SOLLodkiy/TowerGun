@@ -10,19 +10,20 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 6931590ec0a966d49ab098774f47f755, type: 3}
-  m_Name: Pacifier
+  m_Name: Pong
   m_EditorClassIdentifier: 
-  itemName: "\u0421\u043E\u0441\u043A\u0430"
-  description: "\u0423\u043C\u0435\u043D\u044C\u0448\u0430\u0435\u0442 \u0442\u0435\u0431\u044F
-    \u0432 \u0440\u0430\u0437\u043C\u0435\u0440\u0430\u0445"
-  quote: "\"\u0413\u0443\u0433\u0443-\u0433\u0430\u0433\u0430\""
-  cost: 750
-  itemSprite: {fileID: 1408732005, guid: 8c0d50179906d7041be0d59502f49984, type: 3}
+  itemName: "\u0420\u0430\u043A\u0435\u0442\u043A\u0430"
+  description: "\u0423 \u043F\u0443\u043B\u044C \u043F\u043E\u044F\u0432\u043B\u044F\u0435\u0442\u0441\u044F
+    \u0440\u0438\u043A\u043E\u0448\u0435\u0442"
+  quote: "\"\u041B\u044E\u0431\u043B\u044E \u0438\u0433\u0440\u0430\u0442\u044C \u0432
+    \u043F\u0438\u043D\u0433-\u043F\u043E\u043D\u0433\""
+  cost: 2500
+  itemSprite: {fileID: 1582361576850563567, guid: f3565bb7f8505fd4b9236db094f9e3e9, type: 3}
   lockedSprite: {fileID: -1161233042, guid: 184ecb9f7dbc03f44bcc03e50688728c, type: 3}
   unlockedSprite: {fileID: -2039268163, guid: 184ecb9f7dbc03f44bcc03e50688728c, type: 3}
   purchasedSprite: {fileID: 903159187, guid: 184ecb9f7dbc03f44bcc03e50688728c, type: 3}
   equippedSprite: {fileID: 505992865, guid: 184ecb9f7dbc03f44bcc03e50688728c, type: 3}
-  unlockType: 4
-  unlockRequirement: 30
-  boolTargetName: BabyMode
-  scriptName: PistolMove
+  unlockType: 0
+  unlockRequirement: 50
+  boolTargetName: ricochetEnabled
+  scriptName: Bullet

@@ -17,6 +17,25 @@ public class PistolMove : MonoBehaviour
     [SerializeField] private float playerMass = 1.3f;
     [SerializeField] private float recoilForce = 7f;
 
+    [Header("Recoil Modifiers")]
+    [Tooltip("Если включено — recoilForce становится 14 вместо стандартного 12.5")]
+    public bool boostedRecoilEnabled = false;
+    [Tooltip("Стандартная сила отдачи (используется когда boostedRecoilEnabled = false)")]
+    public float normalRecoilForce   = 12.5f;
+    [Tooltip("Повышенная сила отдачи (используется когда boostedRecoilEnabled = true)")]
+    public float boostedRecoilForce  = 14f;
+
+    [Tooltip("Если включено — отдача вниз полностью убирается. Действует только на вертикальную составляющую вниз.")]
+    public bool noDownwardRecoilEnabled = false;
+
+    [Header("Accelerometer")]
+    [Tooltip("Если включено — наклон телефона добавляет горизонтальную силу игроку")]
+    public bool accelEnabled = false;
+    [Tooltip("Сила горизонтального движения от акселерометра")]
+    public float accelForce = 5f;
+    [Tooltip("Мёртвая зона акселерометра — наклоны меньше этого значения игнорируются")]
+    public float accelDeadZone = 0.1f;
+
     public GameObject bulletPrefab;
     public float bulletSpeed = 15f;
     public Transform bulletSpawn;
@@ -92,7 +111,7 @@ public class PistolMove : MonoBehaviour
 
     public CameraFollow cameraFollow;
 
-    public Toggle SwipeToggle;  // Галочка для управления объектом
+    public Toggle SwipeToggle;
 
     // ── Виньетка ──────────────────────────────────────────────────────────────
     [Header("Vignette UI")]
@@ -164,12 +183,10 @@ public class PistolMove : MonoBehaviour
     [Range(0f, 0.98f)]
     public float swipeDirectionSmoothing = 0.82f;
 
-    [Tooltip("Скорость поворота прицела во время удержания (градусов/сек). " +
-             "Чем меньше — тем плавнее и тем сложнее быстро сменить направление.")]
+    [Tooltip("Скорость поворота прицела во время удержания (градусов/сек).")]
     public float swipeAimRotationSpeed = 600f;
 
-    [Tooltip("Порог скорости движения пальца (px/сек): ниже него считается 'пауза' — " +
-             "фиксируем направление и показываем индикатор готовности к выстрелу")]
+    [Tooltip("Порог скорости движения пальца (px/сек): ниже него считается 'пауза'")]
     public float swipePauseVelocityThreshold = 60f;
 
     [Tooltip("Время (сек) неподвижности пальца, после которого направление считается залоченным")]
@@ -188,19 +205,18 @@ public class PistolMove : MonoBehaviour
     public Image swipeStretchIndicator;
 
     // Внутренние переменные свайпа
-    private bool   swipeTouchActive      = false;   // палец на экране
-    private Vector2 swipeTouchStart      = Vector2.zero;   // точка начала касания (px)
-    private Vector2 swipePrevPos         = Vector2.zero;   // предыдущая позиция для вычисления скорости
-    private Vector2 swipeRawDir          = Vector2.zero;   // «сырое» направление свайпа
-    private Vector2 swipeSmoothedDir     = Vector2.zero;   // сглаженное направление
-    private Vector2 swipeLockedDir       = Vector2.zero;   // залоченное направление (перед выстрелом)
-    private bool    swipeDirLocked       = false;          // направление зафиксировано?
-    private float   swipeLockTimer       = 0f;             // таймер неподвижности
-    private float   swipeAutoFireTimer   = 0f;             // таймер автовыстрела
-    private float   swipeStretchAmount   = 0f;             // 0..1, "натяжение рогатки"
-    private float   swipeCurrentVelocity = 0f;             // скорость движения пальца (px/сек)
+    private bool   swipeTouchActive      = false;
+    private Vector2 swipeTouchStart      = Vector2.zero;
+    private Vector2 swipePrevPos         = Vector2.zero;
+    private Vector2 swipeRawDir          = Vector2.zero;
+    private Vector2 swipeSmoothedDir     = Vector2.zero;
+    private Vector2 swipeLockedDir       = Vector2.zero;
+    private bool    swipeDirLocked       = false;
+    private float   swipeLockTimer       = 0f;
+    private float   swipeAutoFireTimer   = 0f;
+    private float   swipeStretchAmount   = 0f;
+    private float   swipeCurrentVelocity = 0f;
 
-    // Для плавного вращения прицела
     private float swipeCurrentAngle = 0f;
     private float swipeTargetAngle  = 0f;
 
@@ -238,12 +254,10 @@ public class PistolMove : MonoBehaviour
         rb.mass = playerMass;
         ApplyBabyMode();
 
-        // Инициализируем угол рогатки
         swipeCurrentAngle = 0f;
         swipeTargetAngle  = 0f;
         SetSwipeUI(false, Vector2.right, 0f);
 
-        // ── SwipeToggle — загружаем сохранённое состояние ─────────────────────
         swipeControlEnabled = PlayerPrefs.GetInt("SwipeControlEnabled", 0) == 1;
         if (SwipeToggle != null)
         {
@@ -264,14 +278,12 @@ public class PistolMove : MonoBehaviour
         pendingShotCount = 0;
     }
 
-    // ── Колбэк Toggle ─────────────────────────────────────────────────────────
     void OnSwipeToggleChanged(bool isOn)
     {
         swipeControlEnabled = isOn;
         PlayerPrefs.SetInt("SwipeControlEnabled", isOn ? 1 : 0);
         PlayerPrefs.Save();
 
-        // Сбрасываем свайп-стейт при переключении чтобы не было «залипших» касаний
         if (!isOn) ResetSwipeState(keepActive: false);
     }
 
@@ -490,6 +502,14 @@ public class PistolMove : MonoBehaviour
             vel.x *= Mathf.Clamp01(1f - horizontalDrag * Time.fixedDeltaTime);
             rb.linearVelocity = vel;
         }
+
+        // Акселерометр — применяем силу в FixedUpdate для физической корректности
+        if (accelEnabled)
+        {
+            float tilt = Input.acceleration.x;
+            if (Mathf.Abs(tilt) > accelDeadZone)
+                rb.AddForce(Vector2.right * tilt * accelForce, ForceMode2D.Force);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -511,7 +531,6 @@ public class PistolMove : MonoBehaviour
 
         HandleSlowMotion();
 
-        // ── Выбор режима управления ───────────────────────────────────────────
         if (swipeControlEnabled)
             HandleSwipeControl();
         else
@@ -575,53 +594,36 @@ public class PistolMove : MonoBehaviour
     // ═══════════════════════════════════════════════════════════════════════════
     //  НОВОЕ УПРАВЛЕНИЕ (СВАЙП-РОГАТКА)
     // ═══════════════════════════════════════════════════════════════════════════
-    //
-    //  Принцип «рогатки»:
-    //  1. Игрок кладёт палец в любую точку экрана — это точка «ручки рогатки».
-    //  2. Ведёт палец в любую сторону — персонаж разворачивается в эту сторону
-    //     (направление = куда ведёт палец, НЕ где находится палец).
-    //  3. Пока палец движется — замедление времени нарастает как в старом режиме.
-    //  4. Если палец остановился → направление фиксируется (lock) и запускается
-    //     таймер автовыстрела. Выстрел происходит либо по автотаймеру, либо
-    //     сразу при отпускании пальца (если свайп был достаточно длинным).
-    //  5. Пока направление залочено — можно снова начать двигать палец чтобы
-    //     скорректировать прицел, лок сбросится.
-    //  6. Короткие случайные подёргивания (< swipeDeadZone) игнорируются.
-    // ═══════════════════════════════════════════════════════════════════════════
 
     void HandleSwipeControl()
     {
         if (!canShoot || isWaitingToShoot) return;
 
-        // ── Определяем позицию пальца / мыши ─────────────────────────────────
         bool  touchBegan  = false;
         bool  touchEnded  = false;
         bool  touchHeld   = false;
         Vector2 touchPos  = Vector2.zero;
 
 #if UNITY_EDITOR || UNITY_STANDALONE
-        // В редакторе — мышь
         if (Input.GetMouseButtonDown(0))  { touchBegan = true; touchPos = Input.mousePosition; }
         else if (Input.GetMouseButton(0)) { touchHeld  = true; touchPos = Input.mousePosition; }
         else if (Input.GetMouseButtonUp(0)) { touchEnded = true; touchPos = Input.mousePosition; }
 #else
-        // На телефоне — первый палец
         if (Input.touchCount > 0)
         {
             Touch t = Input.GetTouch(0);
             touchPos = t.position;
             switch (t.phase)
             {
-                case TouchPhase.Began:    touchBegan = true;  break;
+                case TouchPhase.Began:      touchBegan = true; break;
                 case TouchPhase.Moved:
-                case TouchPhase.Stationary: touchHeld = true; break;
+                case TouchPhase.Stationary: touchHeld  = true; break;
                 case TouchPhase.Ended:
-                case TouchPhase.Canceled: touchEnded = true;  break;
+                case TouchPhase.Canceled:   touchEnded = true; break;
             }
         }
 #endif
 
-        // ── Начало касания ────────────────────────────────────────────────────
         if (touchBegan && IsMousePositionValid(touchPos))
         {
             swipeTouchActive     = true;
@@ -635,38 +637,29 @@ public class PistolMove : MonoBehaviour
             swipeStretchAmount   = 0f;
             swipeCurrentVelocity = 0f;
             swipeCurrentAngle    = float.NaN;
-            holdTimer            = 0f;  // слоу-мо нарастает заново с каждого касания
+            holdTimer            = 0f;
         }
 
-        // ── Удержание ─────────────────────────────────────────────────────────
         if (swipeTouchActive && (touchHeld || touchBegan))
         {
             if (!IsMousePositionValid(touchPos)) return;
 
-            Vector2 delta      = touchPos - swipeTouchStart;   // вектор от старта
-            float   stretchPx  = delta.magnitude;              // длина свайпа в пикселях
+            Vector2 delta     = touchPos - swipeTouchStart;
+            float   stretchPx = delta.magnitude;
 
-            // Скорость движения пальца (px/сек)
             swipeCurrentVelocity = (touchPos - swipePrevPos).magnitude / Time.unscaledDeltaTime;
             swipePrevPos         = touchPos;
 
-            // Если палец ушёл дальше мёртвой зоны — обновляем «сырое» направление
             if (stretchPx > swipeDeadZone)
             {
                 swipeRawDir = delta.normalized;
 
-                // Первое движение после касания — мгновенно берём направление без сглаживания.
-                // Это значит резкий быстрый свайп всегда летит именно туда куда провёл палец.
-                // Сглаживание включается только если палец уже двигался (swipeSmoothedDir != zero),
-                // чтобы во время удержания убрать дрожание.
                 if (swipeSmoothedDir.sqrMagnitude < 0.001f)
                 {
-                    // Первый кадр после deadZone — мгновенный захват направления
                     swipeSmoothedDir = swipeRawDir;
                 }
                 else
                 {
-                    // Последующие кадры — лёгкое сглаживание убирает дрожание пальца
                     swipeSmoothedDir = Vector2.Lerp(swipeRawDir, swipeSmoothedDir,
                         Mathf.Pow(swipeDirectionSmoothing, Time.unscaledDeltaTime * 60f));
                     if (swipeSmoothedDir.sqrMagnitude < 0.001f)
@@ -674,11 +667,9 @@ public class PistolMove : MonoBehaviour
                     swipeSmoothedDir.Normalize();
                 }
 
-                // Угол: если только что сбросили (NaN) — берём мгновенно без MoveTowardsAngle.
-                // Иначе плавно догоняем — даёт ощущение «прицел поворачивается» при удержании.
                 swipeTargetAngle = Mathf.Atan2(swipeSmoothedDir.y, swipeSmoothedDir.x) * Mathf.Rad2Deg;
                 if (float.IsNaN(swipeCurrentAngle))
-                    swipeCurrentAngle = swipeTargetAngle;   // первый кадр — мгновенно
+                    swipeCurrentAngle = swipeTargetAngle;
                 else
                     swipeCurrentAngle = Mathf.MoveTowardsAngle(
                         swipeCurrentAngle, swipeTargetAngle,
@@ -691,33 +682,26 @@ public class PistolMove : MonoBehaviour
                 aimDirection = rotatedDir;
                 ApplyAimRotation(aimDirection);
 
-                // Натяжение рогатки (0..1)
                 swipeStretchAmount = Mathf.Clamp01(stretchPx / swipeMaxStretchPixels);
-
-                // Обновляем UI
                 SetSwipeUI(true, aimDirection, swipeStretchAmount);
 
-                // ── Логика лока направления ───────────────────────────────────
                 if (swipeCurrentVelocity < swipePauseVelocityThreshold)
                 {
                     swipeLockTimer += Time.unscaledDeltaTime;
                     if (swipeLockTimer >= swipeLockDelay && !swipeDirLocked)
                     {
-                        // Фиксируем — палец «натянул рогатку» и остановился
-                        swipeDirLocked  = true;
-                        swipeLockedDir  = aimDirection;
+                        swipeDirLocked     = true;
+                        swipeLockedDir     = aimDirection;
                         swipeAutoFireTimer = 0f;
                     }
                 }
                 else
                 {
-                    // Палец снова двигается — сбрасываем лок
-                    swipeDirLocked = false;
-                    swipeLockTimer = 0f;
+                    swipeDirLocked     = false;
+                    swipeLockTimer     = 0f;
                     swipeAutoFireTimer = 0f;
                 }
 
-                // ── Автовыстрел по таймеру ────────────────────────────────────
                 if (swipeDirLocked)
                 {
                     swipeAutoFireTimer += Time.unscaledDeltaTime;
@@ -725,31 +709,24 @@ public class PistolMove : MonoBehaviour
                         && Time.unscaledTime >= lastFireTime + fireCooldown)
                     {
                         DoSwipeFire();
-                        // НЕ сбрасываем swipeTouchActive — палец ещё на экране,
-                        // после выстрела игрок может начать новый свайп
                         ResetSwipeState(keepActive: true);
                     }
                 }
             }
             else
             {
-                // Палец почти не двигался — просто обновляем прицел без смены направления
                 swipeLockTimer = 0f;
             }
         }
 
-        // ── Отпускание пальца ─────────────────────────────────────────────────
         if (swipeTouchActive && touchEnded)
         {
             Vector2 totalDelta = touchPos - swipeTouchStart;
             float   totalLen   = totalDelta.magnitude;
 
-            // Стреляем если свайп достаточно длинный
             if (totalLen >= swipeMinPixels
                 && Time.unscaledTime >= lastFireTime + fireCooldown)
             {
-                // Если направление было залочено — используем его, иначе финальное
-                // сглаженное направление
                 Vector2 fireDir = swipeDirLocked ? swipeLockedDir : aimDirection;
                 Fire(fireDir);
                 lastFireTime = Time.unscaledTime;
@@ -761,7 +738,6 @@ public class PistolMove : MonoBehaviour
         }
     }
 
-    // Выстрел из свайп-режима (автовыстрел)
     void DoSwipeFire()
     {
         if (Time.unscaledTime < lastFireTime + fireCooldown) return;
@@ -773,7 +749,6 @@ public class PistolMove : MonoBehaviour
         noFireTimer = 0f;
     }
 
-    // Сброс состояния свайпа после выстрела
     void ResetSwipeState(bool keepActive)
     {
         swipeTouchActive     = keepActive;
@@ -792,9 +767,6 @@ public class PistolMove : MonoBehaviour
         }
         else
         {
-            // Палец остался на экране: обновляем стартовую точку к текущей позиции,
-            // чтобы следующий свайп считался от текущего положения пальца.
-            // Это даёт ощущение «рогатка вернулась в нейтраль».
 #if UNITY_EDITOR || UNITY_STANDALONE
             swipeTouchStart = Input.mousePosition;
             swipePrevPos    = swipeTouchStart;
@@ -805,17 +777,13 @@ public class PistolMove : MonoBehaviour
                 swipePrevPos    = swipeTouchStart;
             }
 #endif
-            swipeRawDir      = Vector2.zero;
-            swipeSmoothedDir = Vector2.zero;  // сброс — следующий мини-свайп независим
-            swipeCurrentAngle = float.NaN;    // угол тоже сбрасываем
+            swipeRawDir       = Vector2.zero;
+            swipeSmoothedDir  = Vector2.zero;
+            swipeCurrentAngle = float.NaN;
             SetSwipeUI(false, aimDirection, 0f);
         }
     }
 
-    // ── UI рогатки (стрелка + индикатор натяжения) ────────────────────────────
-    // Подключи опционально в инспекторе: swipeArrowUI и swipeStretchIndicator.
-    // Стрелка поворачивается по направлению выстрела, индикатор масштабируется
-    // по натяжению. Если не подключать — работает без UI.
     void SetSwipeUI(bool visible, Vector2 dir, float stretch)
     {
         if (swipeArrowUI != null)
@@ -825,7 +793,6 @@ public class PistolMove : MonoBehaviour
             {
                 float angle = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg;
                 swipeArrowUI.rotation = Quaternion.Euler(0, 0, angle);
-                // Масштаб стрелки отражает «натяжение»
                 float s = Mathf.Lerp(0.6f, 1.4f, stretch);
                 swipeArrowUI.localScale = new Vector3(s, s, 1f);
             }
@@ -836,7 +803,6 @@ public class PistolMove : MonoBehaviour
             swipeStretchIndicator.gameObject.SetActive(visible);
             if (visible)
             {
-                // Цвет от нейтрального (белый) до «заряженного» (оранжевый) по натяжению
                 swipeStretchIndicator.color = Color.Lerp(
                     new Color(1f, 1f, 1f, 0.4f),
                     new Color(1f, 0.5f, 0f, 0.85f),
@@ -846,7 +812,6 @@ public class PistolMove : MonoBehaviour
         }
     }
 
-    // ── Общая активация игрового UI при первом выстреле ──────────────────────
     void ActivateGameUI()
     {
         playerScript.StartText.SetActive(false);
@@ -868,18 +833,10 @@ public class PistolMove : MonoBehaviour
 
         if (swipeControlEnabled)
         {
-            // Слоу-мо держится всё время пока палец на экране.
-            // swipeStretchAmount НЕ используем как условие — после автовыстрела
-            // он сбрасывается в 0 на один кадр, что раньше роняло замедление.
             if (swipeTouchActive)
             {
-                // holdTimer НЕ сбрасываем каждый кадр — только при первом касании
-                // (touchBegan сбрасывает swipeTouchActive→true, holdTimer уже 0 от сброса)
                 holdTimer += Time.unscaledDeltaTime;
-
-                // Натяжение влияет на ГЛУБИНУ замедления, но не на его наличие:
-                // даже при stretch=0 (палец в мёртвой зоне) слоу-мо уже нарастает.
-                float stretch = Mathf.Max(swipeStretchAmount, 0.15f); // минимум 15% глубины
+                float stretch = Mathf.Max(swipeStretchAmount, 0.15f);
                 float t = Mathf.Clamp01((holdTimer - slowMotionDelay) * slowMotionBuildSpeed)
                           * stretch;
                 aimScale = Mathf.Lerp(1f, slowMotionMinScale, t);
@@ -893,7 +850,6 @@ public class PistolMove : MonoBehaviour
         }
         else
         {
-            // Старая логика
             if (Input.GetMouseButton(0))
             {
                 if (Input.GetMouseButtonDown(0)) holdTimer = 0f;
@@ -1019,12 +975,24 @@ public class PistolMove : MonoBehaviour
         float along = Vector2.Dot(rb.linearVelocity, recoilDir);
         if (along < 0) rb.linearVelocity -= recoilDir * along;
 
+        // Выбираем силу отдачи в зависимости от boostedRecoilEnabled
+        float currentRecoilForce = boostedRecoilEnabled ? boostedRecoilForce : normalRecoilForce;
+
         Vector2 recoil = new Vector2(
             recoilDir.x * horizontalRecoilMultiplier,
             recoilDir.y * verticalRecoilMultiplier).normalized;
-        rb.AddForce(recoil * recoilForce * recoilMultiplier, ForceMode2D.Impulse);
 
-        Vector2 dv = recoilDir * recoilForce / rb.mass;
+        // Убираем отдачу вниз если включено noDownwardRecoilEnabled
+        if (noDownwardRecoilEnabled && recoil.y < 0f)
+            recoil.y = 0f;
+
+        // Ренормализуем только если вектор не нулевой
+        if (recoil.sqrMagnitude > 0.0001f)
+            recoil.Normalize();
+
+        rb.AddForce(recoil * currentRecoilForce * recoilMultiplier, ForceMode2D.Impulse);
+
+        Vector2 dv = recoilDir * currentRecoilForce / rb.mass;
         intendedVelocity += dv;
         if (intendedVelocity.magnitude > playerScript.maxSpeed)
             intendedVelocity = intendedVelocity.normalized * playerScript.maxSpeed;

@@ -1,6 +1,5 @@
 using UnityEngine;
 using System.Collections.Generic;
-using UnityEngine.UI;
 
 public class Bullet : MonoBehaviour
 {
@@ -10,6 +9,17 @@ public class Bullet : MonoBehaviour
 
     public GameObject explosionEffect;
     public GameObject coinEffectPrefab;
+
+    [Header("Ricochet")]
+    [Tooltip("Если включено — пуля рикошетит от стен вместо уничтожения")]
+    public bool ricochetEnabled = false;
+    [Tooltip("Максимальное количество рикошетов до уничтожения пули")]
+    public int maxRicochets = 3;
+    // Тег стен от которых рикошетит пуля
+    [Tooltip("Тег объектов от которых будет рикошет (обычно Wall или Platform)")]
+    public string ricochetTag = "Wall";
+
+    private int ricochetCount = 0;
 
     private static bool selfshotDisabled = false;
 
@@ -21,7 +31,6 @@ public class Bullet : MonoBehaviour
     private Rigidbody2D rb;
     private Collider2D selfCollider;
 
-    // 🔥 НОВОЕ: для рейкаста
     private Vector2 previousPosition;
 
     void Start()
@@ -69,15 +78,14 @@ public class Bullet : MonoBehaviour
 
             if (hit.collider != null && hit.collider != selfCollider)
             {
-                HandleHit(hit.collider);
+                HandleHit(hit.collider, hit.normal);
             }
         }
 
         previousPosition = currentPosition;
     }
 
-    // 🔥 НОВОЕ: общая обработка попадания (чтобы не дублировать код)
-    void HandleHit(Collider2D other)
+    void HandleHit(Collider2D other, Vector2 hitNormal = default)
     {
         if (other.CompareTag("WoodenPlatform") ||
             other.CompareTag("Dead")           ||
@@ -112,6 +120,29 @@ public class Bullet : MonoBehaviour
 
             Destroy(gameObject);
             return;
+        }
+
+        // Рикошет от стены
+        if (ricochetEnabled && other.CompareTag(ricochetTag))
+        {
+            if (ricochetCount < maxRicochets)
+            {
+                ricochetCount++;
+
+                // Отражаем velocity относительно нормали поверхности
+                if (rb != null && hitNormal != Vector2.zero)
+                {
+                    rb.linearVelocity = Vector2.Reflect(rb.linearVelocity, hitNormal);
+                    // Поворачиваем спрайт пули по новому направлению
+                    float angle = Mathf.Atan2(rb.linearVelocity.y, rb.linearVelocity.x) * Mathf.Rad2Deg;
+                    transform.rotation = Quaternion.Euler(0f, 0f, angle);
+                }
+
+                // Сдвигаем previousPosition чтобы рейкаст следующего кадра был корректен
+                previousPosition = transform.position;
+                return;
+            }
+            // Рикошеты кончились — уничтожаем как обычно
         }
 
         CreateExplosionEffect();
