@@ -188,7 +188,7 @@ BoxCollider2D:
   m_UsedByEffector: 0
   m_CompositeOperation: 0
   m_CompositeOrder: 0
-  m_Offset: {x: 0.0016269386, y: -0.00007939525}
+  m_Offset: {x: -0.012688115, y: -0.00007939339}
   m_SpriteTilingProperty:
     border: {x: 0, y: 0, z: 0, w: 0}
     pivot: {x: 0, y: 0}
@@ -198,7 +198,7 @@ BoxCollider2D:
     drawMode: 0
     adaptiveTiling: 0
   m_AutoTiling: 0
-  m_Size: {x: 0.14387792, y: 0.07927555}
+  m_Size: {x: 0.115247816, y: 0.07927555}
   m_EdgeRadius: 0
 --- !u!114 &7248353321240314122
 MonoBehaviour:
@@ -216,6 +216,9 @@ MonoBehaviour:
   safeTime: 0.1
   explosionEffect: {fileID: 7487074782430801891, guid: e9ecb797233d0c34384ee98ae77279f4, type: 3}
   coinEffectPrefab: {fileID: 6861524482827969053, guid: ec097f5f4c7515042b951e90ff5cbca3, type: 3}
+  ricochetEnabled: 0
+  maxRicochets: 3
+  ricochetTag: Platform
 --- !u!96 &6182938857126511
 TrailRenderer:
   serializedVersion: 4

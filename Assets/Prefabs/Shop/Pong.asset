@@ -26,4 +26,4 @@ MonoBehaviour:
   unlockType: 0
   unlockRequirement: 50
   boolTargetName: ricochetEnabled
-  scriptName: Bullet
+  scriptName: DangerIndicator

@@ -26,7 +26,7 @@ public class ImminentDanger : MonoBehaviour
     public bool slowSawEnabled = false;
     [Tooltip("Коэффициент замедления пилы (0.5 = вдвое медленнее)")]
     [Range(0.1f, 0.9f)]
-    public float slowSawMultiplier = 0.6f;
+    public float slowSawMultiplier = 0.85f;
 
     [Header("Links / UI")]
     public Transform player;
@@ -54,10 +54,13 @@ public class ImminentDanger : MonoBehaviour
     private Transform selfTransform;
     private float smoothedFill = 0f;
 
+    private DangerIndicator dangerIndicator;
+
     void Start()
     {
         extraSpeed    = extraStart;
         selfTransform = transform;
+        dangerIndicator = FindFirstObjectByType<DangerIndicator>();
     }
 
     void Update()
@@ -74,8 +77,9 @@ public class ImminentDanger : MonoBehaviour
 
         float currentSpeed = baseSpeed + extraSpeed;
 
-        // Замедление пилы если включено
-        if (slowSawEnabled)
+        // Читаем slowSawEnabled напрямую из DangerIndicator каждый кадр
+        bool slowSaw = dangerIndicator != null && dangerIndicator.slowSawEnabled;
+        if (slowSaw)
             currentSpeed *= slowSawMultiplier;
 
         selfTransform.Translate(Vector3.up * currentSpeed * Time.deltaTime);

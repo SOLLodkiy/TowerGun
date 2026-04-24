@@ -1,5 +1,4 @@
 using UnityEngine;
-using System.Collections.Generic;
 
 public class Bullet : MonoBehaviour
 {
@@ -11,17 +10,16 @@ public class Bullet : MonoBehaviour
     public GameObject coinEffectPrefab;
 
     [Header("Ricochet")]
-    [Tooltip("Если включено — пуля рикошетит от стен вместо уничтожения")]
     public bool ricochetEnabled = false;
-    [Tooltip("Максимальное количество рикошетов до уничтожения пули")]
     public int maxRicochets = 3;
-    // Тег стен от которых рикошетит пуля
-    [Tooltip("Тег объектов от которых будет рикошет (обычно Wall или Platform)")]
-    public string ricochetTag = "Wall";
+    public string ricochetTag = "Platform";
 
     private int ricochetCount = 0;
+    private bool handlingHit = false;
+    private float lastRicochetTime = -1f;
+    private float ricochetCooldown = 0.05f;
 
-    private static bool selfshotDisabled = false;
+    private bool selfshotDisabled = false;
 
     private float spawnTime;
     private GunMove playerScript;
@@ -30,8 +28,9 @@ public class Bullet : MonoBehaviour
 
     private Rigidbody2D rb;
     private Collider2D selfCollider;
+    private Collider2D playerCollider;
 
-    private Vector2 previousPosition;
+    private ContactFilter2D contactFilter;
 
     void Start()
     {
@@ -39,18 +38,36 @@ public class Bullet : MonoBehaviour
         rb           = GetComponent<Rigidbody2D>();
         selfCollider = GetComponent<Collider2D>();
 
+        DangerIndicator di = FindFirstObjectByType<DangerIndicator>();
+        if (di != null)
+        {
+            ricochetEnabled = di.ricochetEnabled;
+            selfshotDisabled = di.selfshotDisabled;
+        }
+
+        lifetime = ricochetEnabled ? 2.75f : 0.67f;
+
         if (rb != null)
             rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
 
-        Destroy(gameObject, lifetime);
+        contactFilter = new ContactFilter2D();
+        contactFilter.useTriggers = false;
+        contactFilter.SetLayerMask(Physics2D.GetLayerCollisionMask(gameObject.layer));
 
-        previousPosition = transform.position;
+        Destroy(gameObject, lifetime);
 
         GameObject player = GameObject.FindWithTag("Player");
         GameObject canvas = GameObject.FindWithTag("Canvas");
 
         if (player != null)
-            playerScript = player.GetComponent<GunMove>();
+        {
+            playerScript  = player.GetComponent<GunMove>();
+            playerCollider = player.GetComponent<Collider2D>();
+
+            // Игнорируем коллайдер игрока на время safeTime
+            if (playerCollider != null)
+                StartCoroutine(IgnorePlayerRoutine());
+        }
 
         if (canvas != null)
         {
@@ -64,85 +81,129 @@ public class Bullet : MonoBehaviour
             selfshot.SetActive(false);
             selfshotDisabled = true;
         }
+
+        // Игнорируем ВСЕ коллайдеры которые перекрываются с пулей при спавне,
+        // кроме врагов — их убиваем сразу. Пулю при этом НЕ уничтожаем.
+        Collider2D[] overlaps = new Collider2D[8];
+        int overlapCount = selfCollider.Overlap(contactFilter, overlaps);
+        for (int i = 0; i < overlapCount; i++)
+        {
+            Collider2D other = overlaps[i];
+            if (other == selfCollider) continue;
+
+            if (other.CompareTag("Enemy"))
+            {
+                EnemyPlatform enemy = other.GetComponent<EnemyPlatform>();
+                if (enemy != null) { enemy.KilledByPlayer(); enemy.Die(); }
+                Destroy(gameObject);
+                return;
+            }
+
+            // Для всех остальных — просто игнорируем коллизию, пуля летит дальше
+            Physics2D.IgnoreCollision(selfCollider, other, true);
+        }
+    }
+
+    private System.Collections.IEnumerator IgnorePlayerRoutine()
+    {
+        Physics2D.IgnoreCollision(selfCollider, playerCollider, true);
+        yield return new WaitForSeconds(safeTime);
+        if (selfCollider != null && playerCollider != null)
+            Physics2D.IgnoreCollision(selfCollider, playerCollider, false);
     }
 
     void FixedUpdate()
     {
-        Vector2 currentPosition = transform.position;
-        Vector2 direction = currentPosition - previousPosition;
-        float distance = direction.magnitude;
+        if (rb == null) return;
 
-        if (distance > 0f)
+        Vector2 velocity = rb.linearVelocity;
+        float   distance = velocity.magnitude * Time.fixedDeltaTime;
+
+        if (distance <= 0f) return;
+
+        RaycastHit2D[] hits = new RaycastHit2D[8];
+        float castDistance = Mathf.Max(0f, distance - Physics2D.defaultContactOffset);
+        int hitCount = selfCollider.Cast(velocity.normalized, contactFilter, hits, castDistance);
+
+        for (int i = 0; i < hitCount; i++)
         {
-            RaycastHit2D hit = Physics2D.Raycast(previousPosition, direction.normalized, distance);
+            Collider2D other = hits[i].collider;
+            if (other == selfCollider) continue;
 
-            if (hit.collider != null && hit.collider != selfCollider)
+            if (IsIgnored(other))
             {
-                HandleHit(hit.collider, hit.normal);
+                Physics2D.IgnoreCollision(other, selfCollider);
+                continue;
             }
+
+            HandleHit(other, hits[i].normal);
+            break;
         }
 
-        previousPosition = currentPosition;
+        handlingHit = false;
+    }
+
+    private bool IsIgnored(Collider2D other)
+    {
+        return other.CompareTag("WoodenPlatform") ||
+               other.CompareTag("Dead")           ||
+               other.CompareTag("Coin")           ||
+               other.CompareTag("ExplosiveBarrel")||
+               other.CompareTag("EditorOnly");
     }
 
     void HandleHit(Collider2D other, Vector2 hitNormal = default)
     {
-        if (other.CompareTag("WoodenPlatform") ||
-            other.CompareTag("Dead")           ||
-            other.CompareTag("Coin")           ||
-            other.CompareTag("ExplosiveBarrel")||
-            other.CompareTag("EditorOnly"))
-        {
-            Physics2D.IgnoreCollision(other, selfCollider);
-            return;
-        }
+        if (handlingHit) return;
+        handlingHit = true;
 
         if (other.CompareTag("Enemy"))
         {
             EnemyPlatform enemy = other.GetComponent<EnemyPlatform>();
-            if (enemy != null)
-            {
-                enemy.KilledByPlayer();
-                enemy.Die();
-            }
+            if (enemy != null) { enemy.KilledByPlayer(); enemy.Die(); }
+            CreateExplosionEffect();
             Destroy(gameObject);
             return;
         }
 
         if (other.CompareTag("Player") && gameObject.CompareTag("PlayerBullet"))
         {
-            if (Time.time - spawnTime < safeTime) return;
-
+            if (Time.time - spawnTime < safeTime)
+            {
+                handlingHit = false;
+                return;
+            }
             if (selfshot != null) selfshot.SetActive(true);
-
             GunMove player = other.GetComponent<GunMove>();
             if (player != null) player.DisablePlayer();
-
+            CreateExplosionEffect();
             Destroy(gameObject);
             return;
         }
 
-        // Рикошет от стены
         if (ricochetEnabled && other.CompareTag(ricochetTag))
         {
+            if (Time.time - lastRicochetTime < ricochetCooldown)
+            {
+                handlingHit = false;
+                return;
+            }
+
             if (ricochetCount < maxRicochets)
             {
                 ricochetCount++;
+                lastRicochetTime = Time.time;
 
-                // Отражаем velocity относительно нормали поверхности
                 if (rb != null && hitNormal != Vector2.zero)
                 {
                     rb.linearVelocity = Vector2.Reflect(rb.linearVelocity, hitNormal);
-                    // Поворачиваем спрайт пули по новому направлению
                     float angle = Mathf.Atan2(rb.linearVelocity.y, rb.linearVelocity.x) * Mathf.Rad2Deg;
                     transform.rotation = Quaternion.Euler(0f, 0f, angle);
                 }
 
-                // Сдвигаем previousPosition чтобы рейкаст следующего кадра был корректен
-                previousPosition = transform.position;
+                handlingHit = false;
                 return;
             }
-            // Рикошеты кончились — уничтожаем как обычно
         }
 
         CreateExplosionEffect();
@@ -151,7 +212,8 @@ public class Bullet : MonoBehaviour
 
     void OnTriggerEnter2D(Collider2D other)
     {
-        HandleHit(other);
+        if (other.isTrigger && !IsIgnored(other))
+            HandleHit(other);
     }
 
     void CreateExplosionEffect()

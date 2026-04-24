@@ -10,18 +10,20 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 6931590ec0a966d49ab098774f47f755, type: 3}
-  m_Name: Sedative
+  m_Name: Bear
   m_EditorClassIdentifier: 
-  itemName: "\u0423\u0441\u043F\u043E\u043A\u043E\u0438\u0442\u0435\u043B\u044C\u043D\u043E\u0435"
-  description: "\u0417\u0430\u043C\u0435\u0434\u043B\u044F\u0435\u0442 \u043F\u0438\u043B\u0443"
-  quote: "\"\u041C\u043D\u0435 \u0441\u043B\u0438\u0448\u043A\u043E\u043C \u0442\u0440\u0435\u0432\u043E\u0436\u043D\u043E\""
-  cost: 1000
-  itemSprite: {fileID: 21300000, guid: 95ac5ff3702c2fb4d966939473729847, type: 3}
+  itemName: "\u041C\u0438\u0448\u043A\u0430"
+  description: "\u0422\u044B \u043D\u0435 \u0441\u043C\u043E\u0436\u0435\u0448\u044C
+    \u043F\u043E\u0433\u0438\u0431\u043D\u0443\u0442\u044C \u043E\u0442 \u0441\u0432\u043E\u0435\u0433\u043E
+    \u0432\u044B\u0441\u0442\u0440\u0435\u043B\u0430"
+  quote: "\"\u042F \u043D\u0430\u0437\u043E\u0432\u0443 \u0435\u0433\u043E \u0422\u0435\u0434\u0434\u0438\""
+  cost: 500000
+  itemSprite: {fileID: 1689640931, guid: 8c0d50179906d7041be0d59502f49984, type: 3}
   lockedSprite: {fileID: -1161233042, guid: 184ecb9f7dbc03f44bcc03e50688728c, type: 3}
   unlockedSprite: {fileID: -2039268163, guid: 184ecb9f7dbc03f44bcc03e50688728c, type: 3}
   purchasedSprite: {fileID: 903159187, guid: 184ecb9f7dbc03f44bcc03e50688728c, type: 3}
   equippedSprite: {fileID: 505992865, guid: 184ecb9f7dbc03f44bcc03e50688728c, type: 3}
-  unlockType: 5
-  unlockRequirement: 1000
-  boolTargetName: slowSawEnabled
+  unlockType: 0
+  unlockRequirement: 10
+  boolTargetName: selfshotDisabled
   scriptName: DangerIndicator

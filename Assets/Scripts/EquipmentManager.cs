@@ -13,7 +13,6 @@ public class EquipmentManager : MonoBehaviour
 
     public GunMove playerScript;
 
-    // Событие — срабатывает при любом изменении экипировки
     public event System.Action OnEquipmentChanged;
 
     void Awake()
@@ -29,14 +28,61 @@ public class EquipmentManager : MonoBehaviour
             return;
         }
 
+        // Только загружаем список предметов и equippedItems из сохранений —
+        // без ApplyEffects, потому что другие объекты ещё не инициализированы
         allShopItems = Resources.FindObjectsOfTypeAll<ShopItemData>();
-        RestoreEquippedEffectsOnStart();
-        SaveEquippedItems();
+        LoadEquippedItems();
     }
 
     void Start()
     {
-        StopAllCoroutines();
+        // Все объекты сцены уже прошли Awake и Start — теперь безопасно применять эффекты
+        ApplyAllEquippedEffects();
+    }
+
+    // Вызывается после каждой загрузки сцены чтобы переприменить эффекты
+    void OnEnable()
+    {
+        SceneManager.sceneLoaded += OnSceneLoaded;
+    }
+
+    void OnDisable()
+    {
+        SceneManager.sceneLoaded -= OnSceneLoaded;
+    }
+
+    private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
+    {
+        // После загрузки сцены ждём один кадр — объекты должны пройти Awake
+        StartCoroutine(ApplyEffectsNextFrame());
+    }
+
+    private IEnumerator ApplyEffectsNextFrame()
+    {
+        // Ждём конца кадра — к этому моменту все Awake и Start отработали
+        yield return new WaitForEndOfFrame();
+        ApplyAllEquippedEffects();
+    }
+
+    private void LoadEquippedItems()
+    {
+        equippedItems.Clear();
+        string saved = PlayerPrefs.GetString("EquippedItems", "");
+        if (string.IsNullOrEmpty(saved)) return;
+
+        foreach (var itemName in saved.Split(';'))
+        {
+            if (string.IsNullOrEmpty(itemName)) continue;
+            ShopItemData item = System.Array.Find(allShopItems, x => x.name == itemName);
+            if (item != null)
+                equippedItems.Add(item);
+        }
+    }
+
+    private void ApplyAllEquippedEffects()
+    {
+        foreach (var item in equippedItems)
+            ApplyEffects(item);
     }
 
     public void EquipItem(ShopItemData item)
@@ -44,7 +90,7 @@ public class EquipmentManager : MonoBehaviour
         equippedItems.Add(item);
         ApplyEffects(item);
         SaveEquippedItems();
-        OnEquipmentChanged?.Invoke(); // уведомляем всех подписчиков
+        OnEquipmentChanged?.Invoke();
     }
 
     public void UnequipItem(ShopItemData item)
@@ -53,7 +99,7 @@ public class EquipmentManager : MonoBehaviour
         equippedItems.Remove(item);
         RemoveEffects(item);
         SaveEquippedItems();
-        OnEquipmentChanged?.Invoke(); // уведомляем всех подписчиков
+        OnEquipmentChanged?.Invoke();
     }
 
     public IEnumerable<ShopItemData> GetEquippedItems() => equippedItems;
@@ -92,23 +138,7 @@ public class EquipmentManager : MonoBehaviour
     {
         string saveStr = string.Join(";", equippedItems.Select(i => i.name));
         PlayerPrefs.SetString("EquippedItems", saveStr);
-    }
-
-    private void RestoreEquippedEffectsOnStart()
-    {
-        string saved = PlayerPrefs.GetString("EquippedItems", "");
-        if (string.IsNullOrEmpty(saved)) return;
-
-        foreach (var itemName in saved.Split(';'))
-        {
-            if (string.IsNullOrEmpty(itemName)) continue;
-            ShopItemData item = System.Array.Find(allShopItems, x => x.name == itemName);
-            if (item != null)
-            {
-                equippedItems.Add(item);
-                ApplyEffects(item);
-            }
-        }
+        PlayerPrefs.Save();
     }
 
     public void RestartScene()

@@ -4,6 +4,11 @@ using UnityEngine;
 
 public class DangerIndicator : MonoBehaviour
 {
+    [Header("Accessory Flags")]
+    public bool ricochetEnabled = false;
+    public bool slowSawEnabled = false;
+    public bool selfshotDisabled = false;
+
     public GameObject warningArcPrefab;  // Префаб полукруга
     public float detectionRadius = 5f;   // Радиус обнаружения блоков
     public float minScale = 0.5f;        // Минимальный размер полукруга
